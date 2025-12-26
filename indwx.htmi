@@ -1741,6 +1741,7 @@
 
 
       // Submit License Add (with Fix)
+      // Submit License Add (with Fix)
       function submitLicenseAdd() {
           const plate = document.getElementById('licPlate').value;
           const room = document.getElementById('licRoom').value;
@@ -1749,10 +1750,7 @@
           const note = document.getElementById('licNote').value;
           // NEW: Get Rights
           const rights = document.getElementById('licParkingRights').value;
-
-
           if(!plate || !room) return showAlert('แจ้งเตือน', 'กรุณากรอกทะเบียนและเลขห้อง', 'error');
-
 
           toggleLoading(true);
           google.script.run.withSuccessHandler(res => {
@@ -1766,6 +1764,159 @@
               plate, room, name, phone, note, rights,
               plateImg: licenseAddImg
           });
+      }
+
+      // ==========================================
+      // --- ACCOUNTING / AI MODE LOGIC (NEW) ---
+      // ==========================================
+      
+      let currentAccData = null; // เก็บข้อมูลไว้สำหรับกด Print
+
+      function handleCheckAccounting() {
+          const start = document.getElementById('accStartDate').value;
+          const end = document.getElementById('accEndDate').value;
+
+          if(!start || !end) return showAlert('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่ให้ครบถ้วน');
+
+          toggleLoading(true);
+          
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              if(res.success) {
+                  currentAccData = res; // เก็บข้อมูล
+                  renderAccountingResult(res);
+              } else {
+                  showAlert('ผิดพลาด', res.message);
+              }
+          }).getAccountingReport(start, end);
+      }
+
+      function renderAccountingResult(data) {
+          const area = document.getElementById('accResultArea');
+          const list = document.getElementById('accListContainer');
+          
+          // แสดงผลสรุป
+          document.getElementById('accTotalCars').innerText = data.summary.totalCars;
+          document.getElementById('accTotalPrice').innerText = data.summary.totalPrice.toLocaleString(); // ใส่ comma
+
+          // สร้างรายการในตาราง
+          let html = '';
+          if(data.details.length === 0) {
+              html = `<div class="text-center py-8 text-gray-300">ไม่มีข้อมูลในช่วงเวลานี้</div>`;
+          } else {
+              data.details.forEach(item => {
+                  html += `
+                    <div class="flex items-center text-xs border-b border-gray-50 pb-2 last:border-0">
+                        <div class="w-1/4 truncate">
+                            <div class="font-bold text-gray-800">${item.roomNo}</div>
+                            <div class="text-[10px] text-gray-500">บัตร ${item.cardId}</div>
+                        </div>
+                        <div class="w-1/4 text-center text-gray-600">
+                            ${item.exitTime.split(' ')[0]}<br>${item.exitTime.split(' ')[1]}
+                        </div>
+                        <div class="w-1/4 text-center text-gray-600">${item.duration}</div>
+                        <div class="w-1/4 text-right font-bold text-gray-800">${item.price}</div>
+                    </div>
+                  `;
+              });
+          }
+
+          list.innerHTML = html;
+          area.classList.remove('hidden');
+      }
+
+      function printAccountingReport() {
+          if (!currentAccData || !currentAccData.summary) return;
+
+          const summary = currentAccData.summary;
+          const details = currentAccData.details;
+          
+          const printWindow = window.open('', '', 'width=900,height=800');
+          
+          let rowsHtml = '';
+          details.forEach((item, index) => {
+               rowsHtml += `
+                <tr>
+                    <td style="text-align:center;">${index + 1}</td>
+                    <td>${item.roomNo} (บัตร ${item.cardId})</td>
+                    <td style="text-align:center;">${item.entryTime}</td>
+                    <td style="text-align:center;">${item.exitTime}</td>
+                    <td style="text-align:center;">${item.duration}</td>
+                    <td style="text-align:right;">${item.price}</td>
+                </tr>
+               `;
+          });
+
+          const printContent = `
+            <html>
+            <head>
+                <title>รายงานสรุปรายรับ</title>
+                <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+                <style>
+                    body { font-family: 'Sarabun', sans-serif; padding: 20px; color: #333; }
+                    .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+                    h1 { margin: 0; font-size: 24px; }
+                    .meta { font-size: 14px; color: #555; margin-top: 5px; }
+                    .summary-box { display: flex; justify-content: space-between; margin-bottom: 20px; background: #f9f9f9; padding: 15px; border: 1px solid #ddd; border-radius: 5px;}
+                    .sum-item { text-align: center; }
+                    .sum-val { font-size: 20px; font-weight: bold; color: #000; }
+                    table { w-full; width: 100%; border-collapse: collapse; font-size: 12px; }
+                    th { background: #eee; padding: 8px; border: 1px solid #ddd; }
+                    td { padding: 8px; border: 1px solid #ddd; }
+                    .footer { margin-top: 30px; text-align: right; font-size: 10px; color: #999; }
+                    @media print { .no-print { display: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>รายงานสรุปรายรับค่าจอดรถ</h1>
+                    <div class="meta">ประจำวันที่: ${summary.startDate} ถึง ${summary.endDate}</div>
+                </div>
+
+                <div class="summary-box">
+                    <div class="sum-item">
+                        <div>จำนวนรถทั้งหมด</div>
+                        <div class="sum-val">${summary.totalCars} คัน</div>
+                    </div>
+                     <div class="sum-item">
+                        <div>รายรับรวม</div>
+                        <div class="sum-val">${summary.totalPrice.toLocaleString()} บาท</div>
+                    </div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th width="5%">#</th>
+                            <th width="20%">ห้อง / เลขบัตร</th>
+                            <th width="20%">เวลาเข้า</th>
+                            <th width="20%">เวลาออก</th>
+                            <th width="15%">ระยะเวลา</th>
+                            <th width="15%">ค่าบริการ (บาท)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                    <tfoot>
+                         <tr>
+                            <td colspan="5" style="text-align:right; font-weight:bold;">รวมทั้งสิ้น</td>
+                            <td style="text-align:right; font-weight:bold;">${summary.totalPrice.toLocaleString()}</td>
+                         </tr>
+                    </tfoot>
+                </table>
+
+                <div class="footer">พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</div>
+            </body>
+            </html>
+          `;
+
+          printWindow.document.write(printContent);
+          printWindow.document.close();
+          setTimeout(() => {
+              printWindow.focus();
+              printWindow.print();
+          }, 500);
       }
     </script>
   </head>
@@ -1844,7 +1995,7 @@
                       <div class="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-500">
                           <i class="fas fa-robot text-2xl"></i>
                       </div>
-                      <span class="font-bold text-gray-700 text-sm">โหมด Ai</span>
+                      <span class="font-bold text-gray-700 text-sm">ตรวจสอบบัญชี</span>
                   </div>
 
               </div>
@@ -1907,17 +2058,58 @@
           </div>
 
           <div id="aiModePage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
-              <div class="flex items-center gap-3 mb-4 mt-2 px-2">
-                  <button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition">
-                      <i class="fas fa-chevron-left"></i>
-                  </button>
-                  <h2 class="text-xl font-bold text-gray-900">AI Mode</h2>
+              <div class="flex items-center justify-between mb-4 mt-2 px-2">
+                  <div class="flex items-center gap-3">
+                      <button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition">
+                          <i class="fas fa-chevron-left"></i>
+                      </button>
+                      <h2 class="text-xl font-bold text-gray-900">ตรวจสอบบัญชี</h2>
+                  </div>
               </div>
               
-              <div class="flex-1 flex flex-col items-center justify-center pb-20 opacity-50">
-                  <i class="fas fa-code text-6xl text-gray-300 mb-4"></i>
-                  <h1 class="text-2xl font-bold text-gray-400">กำลังพัฒนา</h1>
-                  <p class="text-sm text-gray-400 mt-2">ฟีเจอร์นี้ยังไม่เปิดใช้งาน</p>
+              <div class="bg-white mx-2 p-4 rounded-xl shadow-sm border border-gray-100 mb-4">
+                  <div class="grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                          <label class="text-xs text-gray-400 block mb-1">ตั้งแต่วันที่</label>
+                          <input type="date" id="accStartDate" class="w-full h-10 bg-gray-50 border border-gray-200 rounded-lg px-2 text-sm">
+                      </div>
+                      <div>
+                          <label class="text-xs text-gray-400 block mb-1">ถึงวันที่</label>
+                          <input type="date" id="accEndDate" class="w-full h-10 bg-gray-50 border border-gray-200 rounded-lg px-2 text-sm">
+                      </div>
+                  </div>
+                  <button onclick="handleCheckAccounting()" class="w-full h-10 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 transition">
+                      <i class="fas fa-search mr-2"></i> ค้นหาข้อมูล
+                  </button>
+              </div>
+
+              <div id="accResultArea" class="hidden flex-1 flex flex-col px-2 pb-20 overflow-hidden">
+                  <div class="grid grid-cols-2 gap-3 mb-4 flex-none">
+                      <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-center">
+                          <span class="text-xs text-gray-400 block">รถทั้งหมด</span>
+                          <span id="accTotalCars" class="text-2xl font-bold text-gray-800">0</span>
+                          <span class="text-xs text-gray-400">คัน</span>
+                      </div>
+                      <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-center">
+                          <span class="text-xs text-gray-400 block">รายรับรวม</span>
+                          <span id="accTotalPrice" class="text-2xl font-bold text-green-600">0</span>
+                          <span class="text-xs text-gray-400">บาท</span>
+                      </div>
+                  </div>
+                  <div class="flex justify-end mb-2 flex-none">
+                      <button onclick="printAccountingReport()" class="bg-gray-800 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow hover:bg-black transition">
+                          <i class="fas fa-print mr-1"></i> พิมพ์รายงาน
+                      </button>
+                  </div>
+                  <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                      <div class="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between text-xs font-bold text-gray-500">
+                          <div class="w-1/4">ห้อง/ทะเบียน</div>
+                          <div class="w-1/4 text-center">เวลาออก</div>
+                          <div class="w-1/4 text-center">ระยะเวลา</div>
+                          <div class="w-1/4 text-right">ราคา</div>
+                      </div>
+                      <div id="accListContainer" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
+                  </div>
               </div>
           </div>
 
@@ -1951,22 +2143,22 @@
             <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center flex-none">
                 <h3 class="font-bold text-gray-800">รายละเอียด</h3>
                 <div class="flex items-center gap-4">
-                    <div id="histDetailViewControls" class="flex gap-4">
+                     <div id="histDetailViewControls" class="flex gap-4">
                          <button onclick="enableHistoryEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
                          <button onclick="printHistoryDetail()" class="text-gray-500 hover:text-gray-800 transition" title="พิมพ์"><i class="fas fa-print text-xl"></i></button>
                     </div>
-                    <div id="histDetailEditControls" class="hidden flex gap-3">
+                     <div id="histDetailEditControls" class="hidden flex gap-3">
                          <button onclick="cancelHistoryEdit()" class="text-gray-500 font-bold text-sm">ยกเลิก</button>
                          <button onclick="saveHistoryEdit()" class="text-ios-red font-bold text-sm">บันทึก</button>
                     </div>
-                    <button onclick="closeHistoryDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                     <button onclick="closeHistoryDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
                 </div>
             </div>
 
 
             <div class="p-5 overflow-y-auto">
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div><span class="text-xs text-gray-400 block">เลขบัตร</span><span id="histDetailCardId" class="font-bold text-gray-800 text-lg"></span></div>
+                     <div><span class="text-xs text-gray-400 block">เลขบัตร</span><span id="histDetailCardId" class="font-bold text-gray-800 text-lg"></span></div>
                     <div><span class="text-xs text-gray-400 block">เลขห้อง</span><span id="histDetailRoom" class="font-bold text-gray-800 text-lg"></span></div>
                 </div>
                 <div class="bg-gray-50 rounded-xl p-3 mb-4 space-y-2 border border-gray-100">
@@ -1990,7 +2182,7 @@
                     
                     <div>
                         <label class="text-xs text-gray-400 block mb-1">รูปบัตรประชาชน</label>
-                        <div id="histDetailIdContainer" onclick="handleHistoryImgClick('idcard')" class="w-full bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative" style="aspect-ratio: 1.59;">
+                         <div id="histDetailIdContainer" onclick="handleHistoryImgClick('idcard')" class="w-full bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative" style="aspect-ratio: 1.59;">
                             <img id="histDetailIdImg" class="hidden absolute inset-0 w-full h-full object-cover">
                             <div id="histDetailIdPlaceholder" class="flex flex-col items-center text-center p-4 absolute inset-0 justify-center">
                                 <i class="fas fa-id-card text-2xl text-gray-300"></i><span class="text-xs text-gray-400 mt-1">เพิ่มรูปบัตร</span>
@@ -2001,13 +2193,13 @@
 
 
                     <div id="histDetailSlipSection">
-                        <label class="text-xs text-gray-400 block mb-1">รูปสลิป</label>
+                         <label class="text-xs text-gray-400 block mb-1">รูปสลิป</label>
                         <div id="histDetailSlipContainer" onclick="handleHistoryImgClick('slip')" class="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative">
                             <img id="histDetailSlipImg" class="hidden absolute inset-0 w-full h-full object-cover">
-                            <div id="histDetailSlipPlaceholder" class="flex flex-col items-center text-center p-4 absolute inset-0 justify-center">
+                              <div id="histDetailSlipPlaceholder" class="flex flex-col items-center text-center p-4 absolute inset-0 justify-center">
                                 <i class="fas fa-file-invoice-dollar text-2xl text-gray-300"></i><span class="text-xs text-gray-400 mt-1">ไม่มีรูป</span>
                             </div>
-                            <div id="histDetailSlipOverlay" class="absolute inset-0 bg-black/40 hidden flex items-center justify-center text-white text-sm font-bold backdrop-blur-[1px]"><i class="fas fa-camera mr-2"></i> เปลี่ยนรูป</div>
+                              <div id="histDetailSlipOverlay" class="absolute inset-0 bg-black/40 hidden flex items-center justify-center text-white text-sm font-bold backdrop-blur-[1px]"><i class="fas fa-camera mr-2"></i> เปลี่ยนรูป</div>
                         </div>
                     </div>
                 </div>
@@ -2031,7 +2223,7 @@
                 <div id="slipPlaceholder" class="flex flex-col items-center gap-2"><div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center group-hover:bg-gray-200 transition"><i class="fas fa-file-invoice-dollar text-2xl text-gray-400"></i></div><span class="text-sm text-gray-600 font-medium">กดเพื่อถ่ายสลิป</span></div>
                 <img id="slipPreview" class="hidden absolute inset-0 w-full h-full object-contain bg-black">
             </div>
-            <div class="flex gap-3">
+             <div class="flex gap-3">
                 <button onclick="resetHome()" class="flex-1 h-12 rounded-xl border border-gray-200 text-gray-500 font-bold hover:bg-gray-50 transition">ยกเลิก</button>
                 <button onclick="submitExit()" class="flex-1 h-12 rounded-xl bg-ios-red text-white font-bold shadow-lg shadow-red-200 hover:bg-red-600 transition">ยืนยันออก</button>
             </div>
@@ -2045,13 +2237,13 @@
             <div class="space-y-3">
                 <input type="text" id="tempRoom" placeholder="เลขห้อง" class="w-full h-10 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 <input type="text" id="tempPlate" placeholder="ทะเบียนรถ" class="w-full h-10 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
-                <div class="grid grid-cols-2 gap-2"><div><label class="text-xs text-gray-400 block mb-1">วันที่เริ่ม</label><input type="date" id="tempStartDate" class="w-full h-10 border border-gray-200 rounded-lg px-2 text-sm bg-white"></div><div><label class="text-xs text-gray-400 block mb-1">เวลาเริ่ม</label><select id="tempStartHour" class="w-full h-10 border border-gray-200 rounded-lg px-2 bg-white text-gray-800"></select></div></div>
+                 <div class="grid grid-cols-2 gap-2"><div><label class="text-xs text-gray-400 block mb-1">วันที่เริ่ม</label><input type="date" id="tempStartDate" class="w-full h-10 border border-gray-200 rounded-lg px-2 text-sm bg-white"></div><div><label class="text-xs text-gray-400 block mb-1">เวลาเริ่ม</label><select id="tempStartHour" class="w-full h-10 border border-gray-200 rounded-lg px-2 bg-white text-gray-800"></select></div></div>
                 <div class="grid grid-cols-2 gap-2"><div><label class="text-xs text-gray-400 block mb-1">วันที่สิ้นสุด</label><input type="date" id="tempEndDate" class="w-full h-10 border border-gray-200 rounded-lg px-2 text-sm bg-white"></div><div><label class="text-xs text-gray-400 block mb-1">เวลาสิ้นสุด</label><select id="tempEndHour" class="w-full h-10 border border-gray-200 rounded-lg px-2 bg-white text-gray-800"></select></div></div>
-                <div><label class="text-xs text-gray-400 block mb-1">รูปรถ (ไม่บังคับ)</label><div onclick="captureTempAddImage()" class="w-full h-24 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-100 overflow-hidden relative"><div id="addTempImgPlaceholder" class="flex flex-col items-center"><i class="fas fa-image text-gray-400 text-xl mb-1"></i><span class="text-[10px] text-gray-400">กดเลือกรูปภาพ</span></div><img id="addTempImgPreview" class="hidden absolute inset-0 w-full h-full object-cover"></div></div>
+                 <div><label class="text-xs text-gray-400 block mb-1">รูปรถ (ไม่บังคับ)</label><div onclick="captureTempAddImage()" class="w-full h-24 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-100 overflow-hidden relative"><div id="addTempImgPlaceholder" class="flex flex-col items-center"><i class="fas fa-image text-gray-400 text-xl mb-1"></i><span class="text-[10px] text-gray-400">กดเลือกรูปภาพ</span></div><img id="addTempImgPreview" class="hidden absolute inset-0 w-full h-full object-cover"></div></div>
             </div>
             <div class="flex gap-3 mt-6">
                 <button onclick="closeAddTempModal()" class="flex-1 py-2.5 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
-                <button onclick="submitTempAdd()" class="flex-1 py-2.5 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
+                 <button onclick="submitTempAdd()" class="flex-1 py-2.5 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
             </div>
         </div>
     </div>
@@ -2059,7 +2251,7 @@
     <div id="addLicenseModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl max-h-[90vh] overflow-y-auto pb-10">
             <h3 class="text-lg font-bold text-gray-800 mb-4">ลงทะเบียนรถใหม่</h3>
-            <div class="space-y-3">
+             <div class="space-y-3">
                 <input type="text" id="licPlate" placeholder="ทะเบียนรถ" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 <input type="text" id="licRoom" placeholder="เลขห้อง" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 
@@ -2075,7 +2267,7 @@
                 <textarea id="licNote" placeholder="หมายเหตุ (Admin)" class="w-full h-20 border border-gray-200 rounded-lg px-3 py-2 focus:border-yellow-400 outline-none resize-none text-sm"></textarea>
                 
                 <div>
-                    <label class="text-xs text-gray-400 block mb-1">รูปรถ (ไม่บังคับ)</label>
+                     <label class="text-xs text-gray-400 block mb-1">รูปรถ (ไม่บังคับ)</label>
                     <div onclick="addLicenseImage()" class="w-full aspect-square bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-100 overflow-hidden relative">
                         <div id="licImgPlaceholder" class="flex flex-col items-center">
                             <i class="fas fa-image text-gray-400 text-xl mb-1"></i>
@@ -2087,7 +2279,7 @@
             </div>
             <div class="flex gap-3 mt-6">
                 <button onclick="closeAddLicenseModal()" class="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
-                <button onclick="submitLicenseAdd()" class="flex-1 py-3 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
+                 <button onclick="submitLicenseAdd()" class="flex-1 py-3 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
             </div>
         </div>
     </div>
@@ -2097,22 +2289,22 @@
         <div class="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl max-h-[90vh] overflow-y-auto pb-10">
             <h3 class="text-lg font-bold text-gray-800 mb-4">เพิ่มรายชื่อเจ้าของ</h3>
             <div class="space-y-3">
-                <input type="text" id="addOwnerRoom" placeholder="เลขห้อง *" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                 <input type="text" id="addOwnerRoom" placeholder="เลขห้อง *" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 <input type="text" id="addOwnerName" placeholder="ชื่อ-นามสกุล *" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 
                 <div class="grid grid-cols-2 gap-3">
-                    <input type="text" id="addOwnerFloor" placeholder="ชั้น" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                     <input type="text" id="addOwnerFloor" placeholder="ชั้น" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                     <input type="text" id="addOwnerSize" placeholder="ขนาดห้อง" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 </div>
 
 
                 <input type="tel" id="addOwnerPhone1" placeholder="เบอร์โทรศัพท์ 1" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
-                <input type="tel" id="addOwnerPhone2" placeholder="เบอร์โทรศัพท์ 2" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                 <input type="tel" id="addOwnerPhone2" placeholder="เบอร์โทรศัพท์ 2" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
                 
                 <textarea id="addOwnerNote" placeholder="หมายเหตุ" class="w-full h-24 border border-gray-200 rounded-lg px-3 py-2 focus:border-yellow-400 outline-none resize-none text-sm"></textarea>
             </div>
             <div class="flex gap-3 mt-6">
-                <button onclick="closeAddOwnerModal()" class="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
+                 <button onclick="closeAddOwnerModal()" class="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
                 <button onclick="submitOwnerAdd()" class="flex-1 py-3 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
             </div>
         </div>
@@ -2126,7 +2318,7 @@
                 
                 <div id="licDetailViewControls" class="flex items-center gap-4">
                     <button onclick="enableLicenseEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
-                    <button onclick="closeLicenseDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                     <button onclick="closeLicenseDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
                 </div>
                 
                 <div id="licDetailEditControls" class="hidden flex items-center gap-3">
@@ -2137,7 +2329,7 @@
             
             <div class="p-5 overflow-y-auto">
                 <div class="mb-5">
-                    <div id="detailLicImgContainer" class="w-full aspect-square bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 relative group cursor-pointer">
+                     <div id="detailLicImgContainer" class="w-full aspect-square bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 relative group cursor-pointer">
                         <img id="detailLicImg" class="hidden w-full h-full object-cover">
                         <div id="detailLicImgPlaceholder" class="flex flex-col items-center text-gray-300">
                             <i class="fas fa-car text-4xl mb-2"></i>
@@ -2154,13 +2346,13 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <span class="text-xs text-gray-400 block">เลขห้อง</span>
-                            <span id="detailLicRoom" class="font-bold text-gray-800 text-lg"></span>
+                             <span id="detailLicRoom" class="font-bold text-gray-800 text-lg"></span>
                             <input id="editLicRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
                         </div>
                         <div>
                             <span class="text-xs text-gray-400 block">ทะเบียน</span>
                             <span id="detailLicPlate" class="font-bold text-gray-800 text-lg"></span>
-                            <input id="editLicPlate" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
+                             <input id="editLicPlate" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
                         </div>
                     </div>
                     
@@ -2176,14 +2368,14 @@
                              <span class="text-xs text-gray-400 block">ชื่อเจ้าของ</span>
                              <span id="detailLicName" class="font-medium text-gray-800"></span>
                              <input id="editLicName" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
-                         </div>
+                          </div>
                          <div class="mb-2">
                              <span class="text-xs text-gray-400 block">เบอร์โทรศัพท์</span>
                              <div><span id="detailLicPhone" class="font-medium text-gray-800"></span></div>
                              <input id="editLicPhone" type="tel" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
                          </div>
                          <div>
-                             <span class="text-xs text-gray-400 block">หมายเหตุ</span>
+                              <span class="text-xs text-gray-400 block">หมายเหตุ</span>
                              <span id="detailLicNote" class="text-sm text-gray-600 bg-gray-50 p-2 rounded block mt-1"></span>
                              <textarea id="editLicNote" rows="2" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-600 focus:border-blue-500 outline-none resize-none bg-white"></textarea>
                          </div>
@@ -2199,64 +2391,64 @@
     <div id="ownerDetailModal" class="hidden fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative max-h-[90vh] flex flex-col">
             <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center flex-none">
-                <h3 class="font-bold text-gray-800">รายละเอียดเจ้าของ</h3>
+                 <h3 class="font-bold text-gray-800">รายละเอียดเจ้าของ</h3>
                 <div id="ownerDetailViewControls" class="flex items-center gap-4">
                     <button onclick="enableOwnerEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
                     <button onclick="closeOwnerDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
-                </div>
+                 </div>
                 <div id="ownerDetailEditControls" class="hidden flex items-center gap-3">
                     <button onclick="cancelOwnerEdit()" class="text-gray-500 font-bold text-sm">ยกเลิก</button>
                     <button onclick="saveOwnerEdit()" class="text-ios-red font-bold text-sm">บันทึก</button>
                 </div>
             </div>
-            
+             
             <div class="p-5 overflow-y-auto">
                 <div class="space-y-4">
                     <div>
                         <span class="text-xs text-gray-400 block">เลขห้อง</span>
-                        <span id="detailOwnerRoom" class="font-bold text-gray-800 text-lg"></span>
+                         <span id="detailOwnerRoom" class="font-bold text-gray-800 text-lg"></span>
                         <input id="editOwnerRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
                     </div>
                     <div>
-                        <span class="text-xs text-gray-400 block">ชื่อ-นามสกุล</span>
+                         <span class="text-xs text-gray-400 block">ชื่อ-นามสกุล</span>
                         <span id="detailOwnerName" class="font-bold text-gray-800 text-lg"></span>
                         <input id="editOwnerName" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
-                    </div>
+                     </div>
                     
                     <div class="border-t border-dashed border-gray-200 pt-3"></div>
 
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <span class="text-xs text-gray-400 block">ชั้น</span>
+                             <span class="text-xs text-gray-400 block">ชั้น</span>
                             <span id="detailOwnerFloor" class="font-medium text-gray-800"></span>
                             <input id="editOwnerFloor" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
                         </div>
                         <div>
                             <span class="text-xs text-gray-400 block">ขนาดห้อง</span>
-                            <span id="detailOwnerSize" class="font-medium text-gray-800"></span>
+                             <span id="detailOwnerSize" class="font-medium text-gray-800"></span>
                             <input id="editOwnerSize" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
                         </div>
                     </div>
 
 
-                    <div>
+                     <div>
                          <span class="text-xs text-gray-400 block">เบอร์โทรศัพท์ 1</span>
                          <div><span id="detailOwnerPhone1" class="font-medium text-gray-800"></span></div>
                          <input id="editOwnerPhone1" type="tel" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
                     </div>
                     <div>
                          <span class="text-xs text-gray-400 block">เบอร์โทรศัพท์ 2</span>
-                         <div><span id="detailOwnerPhone2" class="font-medium text-gray-800"></span></div>
+                          <div><span id="detailOwnerPhone2" class="font-medium text-gray-800"></span></div>
                          <input id="editOwnerPhone2" type="tel" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
                     </div>
 
 
                     <div>
-                         <span class="text-xs text-gray-400 block">หมายเหตุ</span>
+                          <span class="text-xs text-gray-400 block">หมายเหตุ</span>
                          <span id="detailOwnerNote" class="text-sm text-gray-600 bg-gray-50 p-2 rounded block mt-1"></span>
                          <textarea id="editOwnerNote" rows="2" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-600 focus:border-blue-500 outline-none resize-none bg-white"></textarea>
-                    </div>
+                     </div>
                     
                     <button id="ownerDeleteBtn" onclick="deleteCurrentOwner()" class="hidden w-full py-2.5 text-red-500 font-bold border border-red-100 bg-red-50 rounded-xl hover:bg-red-100 mt-4">ลบรายการ</button>
                 </div>
@@ -2270,40 +2462,42 @@
             <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center">
                 <h3 class="font-bold text-gray-800">รายละเอียด</h3>
                 <div class="flex items-center gap-4">
-                    <button id="tempDetailEditBtn" onclick="enableTempEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
+                     <button id="tempDetailEditBtn" onclick="enableTempEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
                     <button onclick="closeTempDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
                 </div>
             </div>
             <div class="p-5">
+                
                 <div class="grid grid-cols-2 gap-4 mb-4">
                     <div>
                         <span class="text-xs text-gray-400 block">เลขห้อง</span>
                         <span id="viewTempRoom" class="font-bold text-gray-800 text-lg block"></span>
-                        <input id="editTempRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800">
+                         <input id="editTempRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800">
                     </div>
                     <div>
                         <span class="text-xs text-gray-400 block">ทะเบียน</span>
-                        <span id="viewTempPlate" class="font-bold text-gray-800 text-lg block"></span>
+                         <span id="viewTempPlate" class="font-bold text-gray-800 text-lg block"></span>
                         <input id="editTempPlate" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800">
                     </div>
                 </div>
+                
                 <div class="space-y-2 text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl">
                     <div class="flex justify-between"><span>เริ่ม:</span> <span id="detailTempStart" class="font-medium"></span></div>
                     <div class="flex justify-between"><span>สิ้นสุด:</span> <span id="detailTempEnd" class="font-medium"></span></div>
                     <div class="flex justify-between"><span>สถานะ:</span> <span id="detailTempStatus" class="font-bold text-blue-600"></span></div>
                 </div>
-                
+                 
                 <div class="mb-4">
                     <label class="text-xs text-gray-400 block mb-1">รูปรถ</label>
                     <div id="detailTempImgContainer" onclick="handleTempImgClick()" class="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative group">
-                        <img id="detailTempImg" class="hidden w-full h-full object-cover">
+                         <img id="detailTempImg" class="hidden w-full h-full object-cover">
                         <div id="detailTempImgPlaceholder" class="flex flex-col items-center">
                             <i class="fas fa-cloud-upload-alt text-2xl text-gray-300"></i>
-                            <span class="text-xs text-gray-400 mt-1">อัปโหลดรูปภาพ</span>
+                             <span class="text-xs text-gray-400 mt-1">อัปโหลดรูปภาพ</span>
                         </div>
                         <div id="detailTempImgOverlay" class="absolute inset-0 bg-black/20 hidden flex items-center justify-center text-white text-xs font-bold">แตะเพื่อเปลี่ยนรูป</div>
                     </div>
-                </div>
+                 </div>
 
 
                 <div id="tempDetailViewControls">
@@ -2312,7 +2506,7 @@
 
 
                 <div id="tempDetailEditControls" class="hidden flex gap-3">
-                      <button onclick="cancelTempEdit()" class="flex-1 py-2.5 text-gray-600 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
+                       <button onclick="cancelTempEdit()" class="flex-1 py-2.5 text-gray-600 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
                       <button onclick="saveTempEdit()" class="flex-1 py-2.5 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
                 </div>
             </div>
@@ -2330,7 +2524,7 @@
 
     <div id="alertModal" class="hidden fixed inset-0 z-[60] bg-black/20 flex items-center justify-center p-8">
         <div class="bg-white rounded-2xl p-6 shadow-xl w-64 text-center animate-scale-in">
-            <i id="alertIcon" class="fas fa-check-circle text-4xl text-green-500 mb-2"></i>
+             <i id="alertIcon" class="fas fa-check-circle text-4xl text-green-500 mb-2"></i>
             <h4 id="alertTitle" class="font-bold text-gray-800 text-lg mb-1">Title</h4>
             <p id="alertMessage" class="text-gray-500 text-sm mb-4">Message</p>
             <button onclick="closeAlert()" class="w-full py-2 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200">ตกลง</button>
@@ -2354,7 +2548,7 @@
         <div class="bg-white rounded-2xl p-6 shadow-xl w-full max-w-xs text-center animate-scale-in">
             <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
                 <i class="fas fa-lock text-xl"></i>
-            </div>
+             </div>
             <h4 class="font-bold text-gray-800 text-lg mb-2">ยืนยันสิทธิ์</h4>
             <p class="text-gray-500 text-sm mb-4">กรุณากรอกรหัสผ่านเพื่อดำเนินการ</p>
             
@@ -2374,7 +2568,7 @@
                 <i class="fas fa-times text-xl"></i>
             </button>
             <h3 class="text-center font-bold text-gray-800 mb-4">สแกน QR Code</h3>
-            <div id="reader" class="w-full rounded-lg overflow-hidden bg-black h-96"></div>
+             <div id="reader" class="w-full rounded-lg overflow-hidden bg-black h-96"></div>
             <p class="text-center text-xs text-gray-400 mt-4">วาง QR Code ให้อยู่ในกรอบ</p>
         </div>
     </div>
@@ -2393,5 +2587,5 @@
     </div>
 
 
-  </body>
+</body>
 </html>
