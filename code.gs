@@ -213,7 +213,7 @@ function getHistory() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_VISITOR);
   if (!sheet) return [];
-  return fetchHistoryFromSheet(sheet, SHEET_VISITOR, 50);
+  return fetchHistoryFromSheet(sheet, SHEET_VISITOR, 30);
 }
 
 // ==========================================
