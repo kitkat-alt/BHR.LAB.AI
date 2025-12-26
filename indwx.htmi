@@ -25,7 +25,7 @@
 
     <script>
       // --- CONFIG & TAILWIND ---
-      const HOME_HEADER_CONTENT = '<span class="text-ios-red">M</span>ANU'; 
+      const HOME_HEADER_CONTENT = '<span class="text-ios-red">H</span>ORiZON*'; 
 
       if (typeof tailwind !== 'undefined') {
           tailwind.config = {
@@ -1742,6 +1742,7 @@
 
       // Submit License Add (with Fix)
       // Submit License Add (with Fix)
+      // Submit License Add (with Fix)
       function submitLicenseAdd() {
           const plate = document.getElementById('licPlate').value;
           const room = document.getElementById('licRoom').value;
@@ -1750,6 +1751,7 @@
           const note = document.getElementById('licNote').value;
           // NEW: Get Rights
           const rights = document.getElementById('licParkingRights').value;
+
           if(!plate || !room) return showAlert('แจ้งเตือน', 'กรุณากรอกทะเบียนและเลขห้อง', 'error');
 
           toggleLoading(true);
@@ -1767,10 +1769,45 @@
       }
 
       // ==========================================
-      // --- ACCOUNTING / AI MODE LOGIC (NEW) ---
+      // --- ACCOUNTING / AI MODE LOGIC (FINAL) ---
       // ==========================================
       
-      let currentAccData = null; // เก็บข้อมูลไว้สำหรับกด Print
+      let currentAccData = null;
+
+      // จัดการการเปลี่ยนหน้าย่อยใน AI Mode
+      function goToAiAccounting() {
+          document.getElementById('aiMenuSubPage').classList.add('hidden');
+          document.getElementById('aiAccountingSubPage').classList.remove('hidden');
+          
+          // ตั้งค่าวันที่ Default เป็นวันนี้
+          const today = new Date();
+          const offset = today.getTimezoneOffset() * 60000;
+          const localISOTime = (new Date(today - offset)).toISOString().slice(0, 10);
+          
+          const sDate = document.getElementById('accStartDate');
+          const eDate = document.getElementById('accEndDate');
+          if(sDate && !sDate.value) sDate.value = localISOTime;
+          if(eDate && !eDate.value) eDate.value = localISOTime;
+      }
+
+      function backFromAiAccounting() {
+          document.getElementById('aiAccountingSubPage').classList.add('hidden');
+          document.getElementById('aiMenuSubPage').classList.remove('hidden');
+          document.getElementById('accResultArea').classList.add('hidden');
+      }
+
+      // แก้ไข openAppSubPage เดิมเล็กน้อยเพื่อให้รีเซ็ตหน้า AI
+      const originalOpenAppSubPage = openAppSubPage; 
+      openAppSubPage = function(pageName) {
+          originalOpenAppSubPage(pageName);
+          if(pageName === 'ai') {
+              // รีเซ็ตให้แสดงหน้าเมนูเสมอเมื่อกดเข้ามาใหม่
+              if(document.getElementById('aiMenuSubPage')) {
+                  document.getElementById('aiMenuSubPage').classList.remove('hidden');
+                  document.getElementById('aiAccountingSubPage').classList.add('hidden');
+              }
+          }
+      }
 
       function handleCheckAccounting() {
           const start = document.getElementById('accStartDate').value;
@@ -1783,7 +1820,7 @@
           google.script.run.withSuccessHandler(res => {
               toggleLoading(false);
               if(res.success) {
-                  currentAccData = res; // เก็บข้อมูล
+                  currentAccData = res; 
                   renderAccountingResult(res);
               } else {
                   showAlert('ผิดพลาด', res.message);
@@ -1795,11 +1832,9 @@
           const area = document.getElementById('accResultArea');
           const list = document.getElementById('accListContainer');
           
-          // แสดงผลสรุป
           document.getElementById('accTotalCars').innerText = data.summary.totalCars;
-          document.getElementById('accTotalPrice').innerText = data.summary.totalPrice.toLocaleString(); // ใส่ comma
+          document.getElementById('accTotalPrice').innerText = data.summary.totalPrice.toLocaleString();
 
-          // สร้างรายการในตาราง
           let html = '';
           if(data.details.length === 0) {
               html = `<div class="text-center py-8 text-gray-300">ไม่มีข้อมูลในช่วงเวลานี้</div>`;
@@ -1807,15 +1842,14 @@
               data.details.forEach(item => {
                   html += `
                     <div class="flex items-center text-xs border-b border-gray-50 pb-2 last:border-0">
-                        <div class="w-1/4 truncate">
+                        <div class="w-1/3 truncate">
                             <div class="font-bold text-gray-800">${item.roomNo}</div>
                             <div class="text-[10px] text-gray-500">บัตร ${item.cardId}</div>
                         </div>
-                        <div class="w-1/4 text-center text-gray-600">
+                        <div class="w-1/3 text-center text-gray-600">
                             ${item.exitTime.split(' ')[0]}<br>${item.exitTime.split(' ')[1]}
                         </div>
-                        <div class="w-1/4 text-center text-gray-600">${item.duration}</div>
-                        <div class="w-1/4 text-right font-bold text-gray-800">${item.price}</div>
+                        <div class="w-1/3 text-right font-bold text-gray-800">${item.price}</div>
                     </div>
                   `;
               });
@@ -1841,7 +1875,6 @@
                     <td>${item.roomNo} (บัตร ${item.cardId})</td>
                     <td style="text-align:center;">${item.entryTime}</td>
                     <td style="text-align:center;">${item.exitTime}</td>
-                    <td style="text-align:center;">${item.duration}</td>
                     <td style="text-align:right;">${item.price}</td>
                 </tr>
                `;
@@ -1857,12 +1890,27 @@
                     .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
                     h1 { margin: 0; font-size: 24px; }
                     .meta { font-size: 14px; color: #555; margin-top: 5px; }
-                    .summary-box { display: flex; justify-content: space-between; margin-bottom: 20px; background: #f9f9f9; padding: 15px; border: 1px solid #ddd; border-radius: 5px;}
-                    .sum-item { text-align: center; }
-                    .sum-val { font-size: 20px; font-weight: bold; color: #000; }
-                    table { w-full; width: 100%; border-collapse: collapse; font-size: 12px; }
+                    
+                    /* CSS สำหรับหัวข้อบรรทัดเดียวกัน */
+                    .summary-line { font-size: 16px; margin-bottom: 5px; }
+                    .summary-line strong { font-weight: bold; color: #000; }
+
+                    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 20px; }
                     th { background: #eee; padding: 8px; border: 1px solid #ddd; }
                     td { padding: 8px; border: 1px solid #ddd; }
+                    
+                    /* CSS สำหรับยอดรวมท้ายสุด (หน้าสุดท้าย) */
+                    .grand-total { 
+                        margin-top: 20px; 
+                        text-align: right; 
+                        font-size: 18px; 
+                        font-weight: bold; 
+                        background-color: #f9f9f9; 
+                        padding: 10px;
+                        border: 1px solid #ddd;
+                        page-break-inside: avoid;
+                    }
+
                     .footer { margin-top: 30px; text-align: right; font-size: 10px; color: #999; }
                     @media print { .no-print { display: none; } }
                 </style>
@@ -1873,38 +1921,29 @@
                     <div class="meta">ประจำวันที่: ${summary.startDate} ถึง ${summary.endDate}</div>
                 </div>
 
-                <div class="summary-box">
-                    <div class="sum-item">
-                        <div>จำนวนรถทั้งหมด</div>
-                        <div class="sum-val">${summary.totalCars} คัน</div>
-                    </div>
-                     <div class="sum-item">
-                        <div>รายรับรวม</div>
-                        <div class="sum-val">${summary.totalPrice.toLocaleString()} บาท</div>
-                    </div>
+                <div class="summary-line">
+                    จำนวนรถทั้งหมด: <strong>${summary.totalCars}</strong> คัน &nbsp;&nbsp;|&nbsp;&nbsp;
+                    รายรับรวม: <strong>${summary.totalPrice.toLocaleString()}</strong> บาท
                 </div>
 
                 <table>
                     <thead>
                         <tr>
                             <th width="5%">#</th>
-                            <th width="20%">ห้อง / เลขบัตร</th>
+                            <th width="30%">ห้อง / เลขบัตร</th>
                             <th width="20%">เวลาเข้า</th>
                             <th width="20%">เวลาออก</th>
-                            <th width="15%">ระยะเวลา</th>
-                            <th width="15%">ค่าบริการ (บาท)</th>
+                            <th width="25%">ค่าบริการ (บาท)</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${rowsHtml}
                     </tbody>
-                    <tfoot>
-                         <tr>
-                            <td colspan="5" style="text-align:right; font-weight:bold;">รวมทั้งสิ้น</td>
-                            <td style="text-align:right; font-weight:bold;">${summary.totalPrice.toLocaleString()}</td>
-                         </tr>
-                    </tfoot>
                 </table>
+
+                <div class="grand-total">
+                    รวมทั้งสิ้น &nbsp;&nbsp; ${summary.totalPrice.toLocaleString()} บาท
+                </div>
 
                 <div class="footer">พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</div>
             </body>
@@ -1975,15 +2014,14 @@
 
 
       <div id="appSection" class="hidden view-section animate-fade-in h-full flex flex-col">
+          
           <div id="appMenuPage" class="flex-1 flex flex-col p-2">
-              
               <div class="mb-2 mt-2">
                  <div class="bg-white p-1 rounded-xl border border-gray-200 flex shadow-sm">
                      <input type="text" id="quickSearchInput" onkeydown="if(event.key === 'Enter') { this.blur(); handleQuickSearch(); }" class="flex-1 bg-transparent h-10 pl-3 text-sm text-gray-700 placeholder-gray-400 outline-none" placeholder="ค้นหาทะเบียน หรือ ห้อง (ด่วน)...">
                      <button onclick="handleQuickSearch()" class="bg-blue-500 text-white w-10 h-10 rounded-lg flex items-center justify-center shadow-md hover:bg-blue-600 transition"><i class="fas fa-search"></i></button>
                  </div>
               </div>
-
 
               <div class="grid grid-cols-2 gap-4 mt-2">
                   <div onclick="openAppSubPage('history')" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40"><div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-ios-red"><i class="fas fa-history text-2xl"></i></div><span class="font-bold text-gray-700 text-sm">ประวัติ Visitor</span></div>
@@ -1992,12 +2030,11 @@
                   <div onclick="openAppSubPage('owner')" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40"><div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-ios-red"><i class="fas fa-user-friends text-2xl"></i></div><span class="font-bold text-gray-700 text-sm">รายชื่อเจ้าของ</span></div>
                   
                   <div onclick="openAiMode()" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40 col-span-2">
-                      <div class="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-500">
-                          <i class="fas fa-robot text-2xl"></i>
+                      <div class="w-14 h-14 rounded-2xl bg-gray-900 flex items-center justify-center text-white shadow-md">
+                          <i class="fas fa-dragon text-2xl"></i>
                       </div>
-                      <span class="font-bold text-gray-700 text-sm">ตรวจสอบบัญชี</span>
+                      <span class="font-bold text-gray-700 text-sm">โหมด AI</span>
                   </div>
-
               </div>
           </div>
 
@@ -2058,57 +2095,84 @@
           </div>
 
           <div id="aiModePage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
-              <div class="flex items-center justify-between mb-4 mt-2 px-2">
-                  <div class="flex items-center gap-3">
-                      <button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition">
-                          <i class="fas fa-chevron-left"></i>
-                      </button>
-                      <h2 class="text-xl font-bold text-gray-900">ตรวจสอบบัญชี</h2>
-                  </div>
-              </div>
               
-              <div class="bg-white mx-2 p-4 rounded-xl shadow-sm border border-gray-100 mb-4">
-                  <div class="grid grid-cols-2 gap-3 mb-3">
-                      <div>
-                          <label class="text-xs text-gray-400 block mb-1">ตั้งแต่วันที่</label>
-                          <input type="date" id="accStartDate" class="w-full h-10 bg-gray-50 border border-gray-200 rounded-lg px-2 text-sm">
-                      </div>
-                      <div>
-                          <label class="text-xs text-gray-400 block mb-1">ถึงวันที่</label>
-                          <input type="date" id="accEndDate" class="w-full h-10 bg-gray-50 border border-gray-200 rounded-lg px-2 text-sm">
+              <div id="aiMenuSubPage" class="flex-1 flex flex-col">
+                  <div class="flex items-center justify-between mb-4 mt-2 px-2">
+                      <div class="flex items-center gap-3">
+                          <button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition">
+                              <i class="fas fa-chevron-left"></i>
+                          </button>
+                          <h2 class="text-xl font-bold text-gray-900">AI Mode</h2>
                       </div>
                   </div>
-                  <button onclick="handleCheckAccounting()" class="w-full h-10 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 transition">
-                      <i class="fas fa-search mr-2"></i> ค้นหาข้อมูล
-                  </button>
+                  
+                  <div class="p-2 grid grid-cols-2 gap-4">
+                      <div onclick="goToAiAccounting()" class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-32">
+                          <div class="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+                              <i class="fas fa-file-invoice-dollar text-xl"></i>
+                          </div>
+                          <span class="font-bold text-gray-700 text-sm">ตรวจสอบบัญชี</span>
+                      </div>
+                      
+                      <div class="bg-gray-50 p-4 rounded-2xl border border-gray-100 border-dashed flex flex-col items-center justify-center gap-3 opacity-50 h-32">
+                          <i class="fas fa-plus text-gray-300 text-xl"></i>
+                          <span class="text-xs text-gray-400">Coming Soon</span>
+                      </div>
+                  </div>
               </div>
 
-              <div id="accResultArea" class="hidden flex-1 flex flex-col px-2 pb-20 overflow-hidden">
-                  <div class="grid grid-cols-2 gap-3 mb-4 flex-none">
-                      <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-center">
-                          <span class="text-xs text-gray-400 block">รถทั้งหมด</span>
-                          <span id="accTotalCars" class="text-2xl font-bold text-gray-800">0</span>
-                          <span class="text-xs text-gray-400">คัน</span>
-                      </div>
-                      <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-center">
-                          <span class="text-xs text-gray-400 block">รายรับรวม</span>
-                          <span id="accTotalPrice" class="text-2xl font-bold text-green-600">0</span>
-                          <span class="text-xs text-gray-400">บาท</span>
+              <div id="aiAccountingSubPage" class="hidden flex-1 flex flex-col">
+                  <div class="flex items-center justify-between mb-4 mt-2 px-2">
+                      <div class="flex items-center gap-3">
+                          <button onclick="backFromAiAccounting()" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition">
+                              <i class="fas fa-chevron-left"></i>
+                          </button>
+                          <h2 class="text-xl font-bold text-gray-900">ตรวจสอบบัญชี</h2>
                       </div>
                   </div>
-                  <div class="flex justify-end mb-2 flex-none">
-                      <button onclick="printAccountingReport()" class="bg-gray-800 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow hover:bg-black transition">
-                          <i class="fas fa-print mr-1"></i> พิมพ์รายงาน
+
+                  <div class="bg-white mx-2 p-4 rounded-xl shadow-sm border border-gray-100 mb-4">
+                      <div class="grid grid-cols-2 gap-3 mb-3">
+                          <div>
+                              <label class="text-xs text-gray-400 block mb-1">ตั้งแต่วันที่</label>
+                              <input type="date" id="accStartDate" class="w-full h-10 bg-gray-50 border border-gray-200 rounded-lg px-2 text-sm">
+                          </div>
+                          <div>
+                              <label class="text-xs text-gray-400 block mb-1">ถึงวันที่</label>
+                              <input type="date" id="accEndDate" class="w-full h-10 bg-gray-50 border border-gray-200 rounded-lg px-2 text-sm">
+                          </div>
+                      </div>
+                      <button onclick="handleCheckAccounting()" class="w-full h-10 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 transition">
+                          <i class="fas fa-search mr-2"></i> ค้นหาข้อมูล
                       </button>
                   </div>
-                  <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
-                      <div class="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between text-xs font-bold text-gray-500">
-                          <div class="w-1/4">ห้อง/ทะเบียน</div>
-                          <div class="w-1/4 text-center">เวลาออก</div>
-                          <div class="w-1/4 text-center">ระยะเวลา</div>
-                          <div class="w-1/4 text-right">ราคา</div>
+
+                  <div id="accResultArea" class="hidden flex-1 flex flex-col px-2 pb-20 overflow-hidden">
+                      <div class="grid grid-cols-2 gap-3 mb-4 flex-none">
+                          <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-center">
+                              <span class="text-xs text-gray-400 block">รถทั้งหมด</span>
+                              <span id="accTotalCars" class="text-2xl font-bold text-gray-800">0</span>
+                              <span class="text-xs text-gray-400">คัน</span>
+                          </div>
+                          <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-center">
+                              <span class="text-xs text-gray-400 block">รายรับรวม</span>
+                              <span id="accTotalPrice" class="text-2xl font-bold text-green-600">0</span>
+                              <span class="text-xs text-gray-400">บาท</span>
+                          </div>
                       </div>
-                      <div id="accListContainer" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
+                      <div class="flex justify-end mb-2 flex-none">
+                          <button onclick="printAccountingReport()" class="bg-gray-800 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow hover:bg-black transition">
+                              <i class="fas fa-print mr-1"></i> พิมพ์รายงาน
+                          </button>
+                      </div>
+                      <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                          <div class="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between text-xs font-bold text-gray-500">
+                              <div class="w-1/3">ห้อง/ทะเบียน</div>
+                              <div class="w-1/3 text-center">เวลาออก</div>
+                              <div class="w-1/3 text-right">ราคา</div>
+                          </div>
+                          <div id="accListContainer" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
+                      </div>
                   </div>
               </div>
           </div>
