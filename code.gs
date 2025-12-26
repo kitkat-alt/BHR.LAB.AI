@@ -588,3 +588,77 @@ function saveImageToDrive(base64Data, fileName) {
     return "";
   }
 }
+
+// ==========================================
+// --- GROUP 5: ACCOUNTING & REPORT (ระบบบัญชี) ---
+// ==========================================
+
+function getAccountingReport(startDateStr, endDateStr) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Visitor_Log"); // ใช้ชื่อ SHEET_VISITOR ตามตัวแปรเดิม
+  
+  if (!sheet) return { success: false, message: "ไม่พบฐานข้อมูล Visitor" };
+
+  // แปลงวันที่รับเข้า (String YYYY-MM-DD) เป็น Date Object
+  // ตั้งเวลา start เป็น 00:00:00 และ end เป็น 23:59:59
+  const start = new Date(startDateStr);
+  start.setHours(0, 0, 0, 0);
+  
+  const end = new Date(endDateStr);
+  end.setHours(23, 59, 59, 999);
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: true, summary: { totalCars: 0, totalPrice: 0 }, details: [] };
+
+  const rows = data.slice(1);
+  const reportData = [];
+  let totalCars = 0;
+  let totalPrice = 0;
+
+  // วนลูปเช็คข้อมูล
+  rows.forEach(row => {
+    // row[5] คือ Exit Time (เวลาออก) -> เราจะคิดบัญชีตอนรถออกและจ่ายเงินแล้ว
+    // row[4] คือ Status -> ต้องเป็น 'Completed' ถึงจะนับเงิน
+    const exitTimeRaw = row[5];
+    const status = row[4];
+    const priceRaw = row[7];
+
+    if (exitTimeRaw && status === 'Completed') {
+      const exitTime = new Date(exitTimeRaw);
+      
+      // เช็คว่าอยู่ในช่วงวันที่เลือกหรือไม่
+      if (exitTime >= start && exitTime <= end) {
+        const price = parseFloat(priceRaw) || 0;
+        
+        totalCars++;
+        totalPrice += price;
+
+        reportData.push({
+            entryTime: formatDateSafe(new Date(row[0])) + " " + formatTimeSafe(new Date(row[0])),
+            exitTime: formatDateSafe(exitTime) + " " + formatTimeSafe(exitTime),
+            cardId: row[1],
+            roomNo: row[2],
+            duration: row[6],
+            price: price
+        });
+      }
+    }
+  });
+
+  // เรียงลำดับตามเวลาออกล่าสุดขึ้นก่อน
+  reportData.sort((a, b) => {
+      // แปลงกลับเป็น timestamp เพื่อ sort อย่างง่าย (หรือจะ sort ที่ client ก็ได้)
+      return new Date(b.exitTime).getTime() - new Date(a.exitTime).getTime();
+  });
+
+  return {
+    success: true,
+    summary: {
+      totalCars: totalCars,
+      totalPrice: totalPrice,
+      startDate: formatDateSafe(start),
+      endDate: formatDateSafe(end)
+    },
+    details: reportData
+  };
+}
