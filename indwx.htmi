@@ -1,0 +1,2397 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+      /* Hide number input arrows/spinners */
+      input[type=number]::-webkit-inner-spin-button, 
+      input[type=number]::-webkit-outer-spin-button { 
+        -webkit-appearance: none; 
+        margin: 0; 
+      }
+      input[type=number] {
+        -moz-appearance: textfield;
+      }
+    </style>
+
+
+    <script>
+      // --- CONFIG & TAILWIND ---
+      const HOME_HEADER_CONTENT = '<span class="text-ios-red">M</span>ANU'; 
+
+      if (typeof tailwind !== 'undefined') {
+          tailwind.config = {
+            theme: {
+              extend: {
+                colors: {
+                  ios: {
+                    bg: '#F2F2F7',
+                    card: '#FFFFFF',
+                    red: '#FF3B30',
+                    gray: '#8E8E93',
+                    separator: '#C6C6C8',
+                    blue: '#007AFF',
+                    green: '#34C759',
+                    indigo: '#5856D6',
+                    orange: '#FF9500',
+                    yellow: '#FFCC00'
+                  }
+                },
+                fontFamily: {
+                  sans: ['-apple-system', 'BlinkMacSystemFont', 'Sarabun', 'sans-serif'],
+                }
+              }
+            }
+          }
+      } else {
+          console.warn("Tailwind CSS failed to load or is not defined yet.");
+      }
+
+
+      // --- GLOBAL VARS ---
+      let currentMode = 'visitor';
+      let tempActiveData = [];
+      let tempHistoryData = [];
+      let currentTempTab = 'active'; 
+      
+      let html5QrCode;
+      let cameraStream = null;
+      let targetPhotoType = '';
+      let currentRecord = null;
+      let currentPlateImg = null; 
+      let currentSlipImg = null;
+      let tempAddPlateImg = null; 
+      
+      // VISITOR EDIT VARS
+      let isHistoryEditMode = false;
+      let historyData = []; 
+      let selectedHistoryIndex = -1;
+      
+      // LICENSE & OWNER VARS
+      let licenseData = [];
+      let ownerData = [];
+      let licenseEditImg = null;
+      let licenseAddImg = null;
+
+
+      // TEMP EDIT VARS
+      let isTempEditMode = false;
+      
+      // --- PIN SECURITY VARS (UPDATED FOR AI MODE) ---
+      const ADMIN_PIN = '123';
+      const AI_PIN = '199'; // [NEW] PIN สำหรับโหมด AI
+      let pendingPinAction = null;
+      let pinCheckMode = 'admin'; // [NEW] ตัวแปรระบุว่ากำลังตรวจ PIN ของโหมดไหน
+
+      // [UPDATED] เพิ่มพารามิเตอร์ mode
+      function requestAdminPin(callback, mode = 'admin') {
+          pendingPinAction = callback;
+          pinCheckMode = mode;
+          document.getElementById('pinInput').value = '';
+          document.getElementById('pinModal').classList.remove('hidden');
+          document.getElementById('pinModal').classList.add('flex');
+          setTimeout(() => document.getElementById('pinInput').focus(), 300);
+      }
+
+      // [UPDATED] ตรวจสอบ PIN ตามโหมด
+      function submitAdminPin() {
+          const input = document.getElementById('pinInput').value;
+          let isCorrect = false;
+
+          if (pinCheckMode === 'ai') {
+              if (input === AI_PIN) isCorrect = true; // เช็ค 199
+          } else {
+              if (input === ADMIN_PIN) isCorrect = true; // เช็ค 123
+          }
+
+          if (isCorrect) {
+              const actionToRun = pendingPinAction;
+              closePinModal();
+              if (actionToRun) actionToRun();
+          } else {
+              showAlert('ผิดพลาด', 'รหัสผ่านไม่ถูกต้อง', 'error');
+              document.getElementById('pinInput').value = '';
+          }
+      }
+
+      function closePinModal() {
+          document.getElementById('pinModal').classList.add('hidden');
+          document.getElementById('pinModal').classList.remove('flex');
+          pendingPinAction = null;
+      }
+      
+      // [NEW] ฟังก์ชันเปิดโหมด AI
+      function openAiMode() {
+          requestAdminPin(() => {
+              openAppSubPage('ai');
+          }, 'ai'); // ส่ง mode 'ai' ไป
+      }
+    
+
+      // --- UTILS ---
+      function fixDriveLink(url) { return url || ""; }
+      function toggleLoading(show) { document.getElementById('loader').classList.toggle('hidden', !show); }
+      
+      function showAlert(t,m,type='success') { 
+          document.getElementById('alertTitle').innerText=t; document.getElementById('alertMessage').innerText=m;
+          document.getElementById('alertIcon').className = type==='success' ? "fas fa-check-circle text-4xl text-green-500 mb-2" : "fas fa-exclamation-circle text-4xl text-red-500 mb-2";
+          document.getElementById('alertModal').classList.remove('hidden'); document.getElementById('alertModal').classList.add('flex');
+      }
+      function closeAlert() { document.getElementById('alertModal').classList.add('hidden'); document.getElementById('alertModal').classList.remove('flex'); }
+      
+      let confirmCallback = null;
+      function showConfirm(title, message, onConfirm) {
+        document.getElementById('confirmTitle').innerText = title;
+        document.getElementById('confirmMessage').innerText = message;
+        confirmCallback = onConfirm;
+        document.getElementById('confirmModal').classList.remove('hidden');
+        document.getElementById('confirmModal').classList.add('flex');
+      }
+      function onConfirmYes() {
+          document.getElementById('confirmModal').classList.add('hidden');
+          document.getElementById('confirmModal').classList.remove('flex');
+          if(confirmCallback) confirmCallback();
+      }
+      function closeConfirm() { document.getElementById('confirmModal').classList.add('hidden'); document.getElementById('confirmModal').classList.remove('flex'); }
+      
+      // --- APP NAVIGATION ---
+      function switchTab(tabName) {
+        document.getElementById('homeSection').classList.add('hidden');
+        document.getElementById('appSection').classList.add('hidden');
+        
+        const hBtn = document.getElementById('btnTabHome');
+        const aBtn = document.getElementById('btnTabApp');
+        
+        hBtn.children[0].className = "fas fa-qrcode text-xl mb-0.5 text-gray-400";
+        hBtn.children[1].className = "text-[10px] font-medium text-gray-500";
+        aBtn.children[0].className = "fas fa-th-large text-xl mb-0.5 text-gray-400"; 
+        aBtn.children[1].className = "text-[10px] font-medium text-gray-500";
+
+
+        if(tabName === 'home') {
+          document.getElementById('homeSection').classList.remove('hidden');
+          hBtn.children[0].className = "fas fa-qrcode text-xl text-ios-red mb-0.5";
+          hBtn.children[1].className = "text-[10px] font-semibold text-ios-red";
+        }
+        if(tabName === 'app') {
+           document.getElementById('appSection').classList.remove('hidden');
+           aBtn.children[0].className = "fas fa-th-large text-xl mb-0.5 text-gray-900"; 
+           aBtn.children[1].className = "text-[10px] font-semibold text-gray-900";
+           openAppSubPage('menu');
+        }
+      }
+
+
+      function openAppSubPage(pageName) {
+          document.getElementById('appMenuPage').classList.add('hidden');
+          document.getElementById('tempParkingPage').classList.add('hidden');
+          document.getElementById('visitorHistoryPage').classList.add('hidden');
+          document.getElementById('licensePlatePage').classList.add('hidden');
+          document.getElementById('ownerListPage').classList.add('hidden'); 
+          
+          // [NEW] ซ่อนหน้า AI
+          const aiPage = document.getElementById('aiModePage');
+          if(aiPage) aiPage.classList.add('hidden');
+          
+          document.querySelector('main').classList.remove('pt-10');
+          document.querySelector('main').classList.add('pt-2');
+
+
+          if(pageName === 'menu') {
+              document.getElementById('appMenuPage').classList.remove('hidden');
+          } else if(pageName === 'temp') {
+              document.getElementById('tempParkingPage').classList.remove('hidden');
+              loadTempData();
+          } else if(pageName === 'history') {
+              document.getElementById('visitorHistoryPage').classList.remove('hidden');
+              loadVisitorHistory();
+          } else if(pageName === 'license') { 
+              document.getElementById('licensePlatePage').classList.remove('hidden');
+              loadLicenseData();
+          } else if(pageName === 'owner') { 
+              document.getElementById('ownerListPage').classList.remove('hidden');
+              loadOwnerData();
+          } else if(pageName === 'ai') { 
+              // [NEW] เปิดหน้า AI
+              if(aiPage) aiPage.classList.remove('hidden');
+          } else {
+              showAlert('แจ้งเตือน', 'ฟีเจอร์นี้กำลังพัฒนา', 'success');
+              document.getElementById('appMenuPage').classList.remove('hidden');
+          }
+      }
+
+
+      // --- VISITOR LOGIC ---
+      function loadHomeTempStatus() {
+          google.script.run.withSuccessHandler(renderHomeTempStatus).getAllTempData();
+      }
+
+
+      function renderHomeTempStatus(res) {
+          const container = document.getElementById('homeTempStatusContainer');
+          if (!container) return;
+          
+          if (!document.getElementById('entryFormArea').classList.contains('hidden')) {
+              container.classList.add('hidden');
+              return;
+          }
+          
+          const activeList = res.active || [];
+          
+          if (activeList.length === 0) {
+              container.innerHTML = '';
+              container.classList.add('hidden');
+              return;
+          }
+          
+          container.classList.remove('hidden');
+          
+          let html = '<div class="text-[10px] text-gray-400 font-bold mb-1 pl-1">สถานะจอดชั่วคราว</div>';
+          html += '<div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden divide-y divide-gray-100">';
+          
+          activeList.forEach(item => {
+              let statusColor = 'text-gray-500';
+              let statusText = item.status;
+              
+              if (item.status === 'Waiting') {
+                  statusColor = 'text-orange-500';
+                  statusText = 'รอเข้า';
+              } else if (item.status === 'Parked') {
+                  statusColor = 'text-blue-600';
+                  statusText = 'จอดอยู่';
+              }
+
+
+              html += `
+                <div class="px-3 py-2 flex justify-between items-center text-xs">
+                    <div class="flex items-center gap-3">
+                        <span class="font-bold text-gray-900 w-10">${item.room}</span>
+                        <span class="text-gray-600">${item.plate}</span>
+                    </div>
+                    <span class="font-bold ${statusColor}">${statusText}</span>
+                </div>
+              `;
+          });
+          html += '</div>';
+          
+          container.innerHTML = html;
+      }
+
+
+
+
+      function initHomeHeader() {
+          const headerEl = document.getElementById('homeHeaderDisplay');
+          if(headerEl) {
+              headerEl.innerHTML = HOME_HEADER_CONTENT;
+          }
+          loadHomeTempStatus();
+      }
+
+
+      function handleVisitorAction() {
+        const cardId = document.getElementById('visitorCardId').value;
+        if (!cardId) return showAlert('แจ้งเตือน', 'กรุณากรอกเลขบัตร', 'error');
+        
+        toggleLoading(true);
+        
+        google.script.run.withSuccessHandler(res => {
+          toggleLoading(false);
+          if (res.found) openCheckoutPopup(res);
+          else showEntryForm(cardId);
+        }).getParkingStatus(cardId);
+      }
+
+
+      function showEntryForm(cardId) {
+          document.getElementById('searchArea').classList.add('hidden');
+          
+          const tempContainer = document.getElementById('homeTempStatusContainer');
+          if(tempContainer) tempContainer.classList.add('hidden');
+
+
+          document.getElementById('entryFormArea').classList.remove('hidden');
+          document.getElementById('entryCardIdDisplay').value = cardId;
+          document.getElementById('entryRoomNo').value = ""; 
+          setTimeout(() => document.getElementById('entryRoomNo').focus(), 300);
+      }
+
+
+      function submitEntry() { 
+        const cardId = document.getElementById('entryCardIdDisplay').value; 
+        const roomNo = document.getElementById('entryRoomNo').value;
+        if (!cardId || !roomNo) return showAlert('แจ้งเตือน', 'กรุณากรอกข้อมูลให้ครบ', 'error');
+        if (!currentPlateImg) return showAlert('แจ้งเตือน', 'กรุณาถ่ายรูปทะเบียนรถก่อนบันทึก', 'error');
+
+
+        toggleLoading(true);
+        const data = { cardId, roomNo, plateImg: currentPlateImg };
+        google.script.run.withSuccessHandler(res => {
+            toggleLoading(false);
+            if (res.success) { showAlert('สำเร็จ', res.message, 'success'); resetHome(); }
+            else showAlert('ผิดพลาด', res.message, 'error');
+        }).saveEntry(data);
+      }
+
+
+      function openCheckoutPopup(record) {
+          currentRecord = record;
+          const modal = document.getElementById('exitPopupModal');
+          modal.classList.remove('hidden'); modal.classList.add('flex');
+          
+          document.getElementById('exitInfo').innerHTML = `
+             <div class="space-y-3">
+                 <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                    <span class="text-gray-500 text-sm">เลขบัตร</span>
+                    <span class="font-bold text-lg text-gray-800">${record.cardId}</span>
+                 </div>
+                 <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                    <span class="text-gray-500 text-sm">เลขห้อง</span>
+                    <span class="font-bold text-lg text-gray-800">${record.roomNo}</span>
+                 </div>
+                 <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                    <span class="text-gray-500 text-sm">เวลาเข้า</span>
+                    <span class="font-medium text-gray-800">${record.entryTime}</span>
+                 </div>
+                 <div class="flex justify-between items-center bg-red-50 p-2 rounded-lg">
+                    <span class="text-red-500 text-sm font-bold">ระยะเวลา</span>
+                    <span class="font-bold text-red-600">${record.durationText}</span>
+                 </div>
+             </div>
+          `;
+          document.getElementById('exitPriceDisplay').innerText = record.price;
+      }
+
+
+      function submitExit() {
+        if (!currentRecord) return;
+        if (currentRecord.price > 0 && !currentSlipImg) {
+            return showAlert('แจ้งเตือน', 'มียอดค่าบริการ กรุณาแนบสลิปโอนเงิน', 'error');
+        }
+
+
+        showConfirm('ยืนยันรถออก', `ยอดชำระ ${currentRecord.price} บาท ยืนยันหรือไม่?`, () => {
+            toggleLoading(true);
+            const data = { ...currentRecord, slipImg: currentSlipImg };
+            google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              document.getElementById('exitPopupModal').classList.add('hidden');
+              document.getElementById('exitPopupModal').classList.remove('flex');
+              if (res.success) { showAlert('สำเร็จ', res.message, 'success'); resetHome(); } 
+              else { showAlert('ผิดพลาด', res.message, 'error'); }
+            }).saveExit(data);
+        });
+      }
+
+
+      function resetHome() {
+          document.getElementById('visitorCardId').value = "";
+          document.getElementById('searchArea').classList.remove('hidden');
+          document.getElementById('entryFormArea').classList.add('hidden');
+          document.getElementById('entryRoomNo').value = "";
+          
+          currentPlateImg = null;
+          document.getElementById('platePreview').classList.add('hidden');
+          document.getElementById('platePlaceholder').classList.remove('hidden');
+          
+          const plateContainer = document.getElementById('plateImageContainer');
+          if(plateContainer) {
+              plateContainer.classList.remove('aspect-square');
+              plateContainer.classList.add('h-32');
+          }
+
+
+          currentRecord = null;
+          currentSlipImg = null;
+          document.getElementById('slipPreview').classList.add('hidden');
+          document.getElementById('slipPlaceholder').classList.remove('hidden');
+
+
+          const slipContainer = document.getElementById('slipImageContainer');
+          if(slipContainer) {
+              slipContainer.classList.remove('aspect-square');
+              slipContainer.classList.add('h-32');
+          }
+          
+          document.getElementById('exitPopupModal').classList.add('hidden');
+          document.getElementById('exitPopupModal').classList.remove('flex');
+
+
+          loadHomeTempStatus();
+      }
+
+
+      // --- VISITOR HISTORY LOGIC ---
+      function loadVisitorHistory() {
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(data => {
+              toggleLoading(false);
+              historyData = data; 
+              renderHistoryList(historyData);
+          }).getHistory();
+      }
+
+
+      function renderHistoryList(data) {
+          const listContainer = document.getElementById('historyListContainer');
+          listContainer.innerHTML = '';
+          
+          if(data.length === 0) {
+              listContainer.innerHTML = `<div class="text-center py-12 text-gray-300 flex flex-col items-center"><i class="fas fa-history text-4xl mb-3"></i><span>ไม่มีประวัติ</span></div>`;
+              return;
+          }
+
+
+          data.forEach((item, index) => {
+              const isParked = item.status === 'Parked';
+              const statusHtml = isParked 
+                  ? `<span class="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-[10px] font-bold">จอดอยู่</span>`
+                  : `<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-[10px] font-bold">ออกแล้ว</span>`;
+              
+              let dateDisplay = "";
+              let timeDisplay = "";
+              let labelColor = "text-gray-500";
+
+
+              if (isParked) {
+                  dateDisplay = item.entryDateDisplay || item.entryDate || "-"; 
+                  timeDisplay = item.entryTime;
+                  labelColor = "text-blue-600";
+              } else {
+                  dateDisplay = item.exitDateDisplay || item.exitDate || item.entryDateDisplay || "-";
+                  timeDisplay = item.exitTime;
+                  labelColor = "text-gray-500";
+              }
+
+
+              if (!dateDisplay || dateDisplay === 'undefined' || dateDisplay === 'null') dateDisplay = '-';
+
+
+              listContainer.innerHTML += `
+                <div onclick="openHistoryDetail(${index})" class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm mb-3 active:scale-98 transition cursor-pointer">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="font-bold text-gray-800 text-lg">${item.roomNo}</span>
+                                <span class="text-xs bg-gray-100 px-1.5 rounded text-gray-500">บัตร ${item.cardId}</span>
+                            </div>
+                            <div class="text-xs ${labelColor} flex items-center gap-1">
+                                <i class="far fa-calendar text-[10px]"></i> ${dateDisplay} 
+                                <i class="far fa-clock text-[10px] ml-1"></i> ${timeDisplay}
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            ${statusHtml}
+                            <div class="font-bold text-gray-800 mt-1">${item.price} ฿</div>
+                        </div>
+                    </div>
+                </div>
+              `;
+          });
+      }
+
+
+      function openHistoryDetail(index) {
+          selectedHistoryIndex = index;
+          const item = historyData[index];
+          currentRecord = item; 
+          isHistoryEditMode = false; 
+
+
+          const modal = document.getElementById('historyDetailModal');
+          
+          document.getElementById('histDetailCardId').innerText = item.cardId;
+          document.getElementById('histDetailRoom').innerText = item.roomNo;
+          
+          const enDate = item.entryDateDisplay || item.entryDate || '-';
+          const exDate = item.exitDateDisplay || item.exitDate || '-';
+          
+          document.getElementById('histDetailEntryDate').innerText = (enDate === 'undefined') ? '-' : enDate;
+          document.getElementById('histDetailEntryTime').innerText = item.entryTime || '-';
+          document.getElementById('histDetailExitDate').innerText = (exDate === 'undefined') ? '-' : exDate;
+          document.getElementById('histDetailExitTime').innerText = item.exitTime || '-';
+          document.getElementById('histDetailPrice').innerText = item.price + ' บาท';
+          
+          const plateImgEl = document.getElementById('histDetailPlateImg');
+          const platePlaceholder = document.getElementById('histDetailPlatePlaceholder'); 
+          if(item.plateImg) {
+              plateImgEl.src = fixDriveLink(item.plateImg);
+              plateImgEl.classList.remove('hidden');
+              platePlaceholder.classList.add('hidden'); 
+          } else {
+              plateImgEl.classList.add('hidden');
+              platePlaceholder.classList.remove('hidden'); 
+          }
+
+
+          const slipImgEl = document.getElementById('histDetailSlipImg');
+          const slipSection = document.getElementById('histDetailSlipSection');
+          const slipPlaceholder = document.getElementById('histDetailSlipPlaceholder');
+          if(item.slipImg) {
+              slipImgEl.src = fixDriveLink(item.slipImg);
+              slipSection.classList.remove('hidden');
+              slipImgEl.classList.remove('hidden');
+              slipPlaceholder.classList.add('hidden');
+          } else {
+              slipSection.classList.add('hidden'); 
+              slipImgEl.classList.add('hidden');
+              slipPlaceholder.classList.remove('hidden');
+          }
+
+
+          const idImgEl = document.getElementById('histDetailIdImg');
+          const idPlaceholder = document.getElementById('histDetailIdPlaceholder');
+          
+          document.getElementById('histDetailIdOverlay').classList.add('hidden');
+
+
+          if(item.idCardImg) {
+              idImgEl.src = fixDriveLink(item.idCardImg);
+              idImgEl.classList.remove('hidden');
+              idPlaceholder.classList.add('hidden');
+          } else {
+              idImgEl.classList.add('hidden');
+              idPlaceholder.classList.remove('hidden'); 
+          }
+
+
+          document.getElementById('histDetailViewControls').classList.remove('hidden');
+          document.getElementById('histDetailEditControls').classList.add('hidden');
+
+
+          modal.classList.remove('hidden');
+          modal.classList.add('flex');
+      }
+
+
+      function enableHistoryEdit() {
+          isHistoryEditMode = true;
+          const idContainer = document.getElementById('histDetailIdContainer');
+          idContainer.classList.remove('pointer-events-none'); 
+          document.getElementById('histDetailIdOverlay').classList.remove('hidden');
+          document.getElementById('histDetailViewControls').classList.add('hidden');
+          document.getElementById('histDetailEditControls').classList.remove('hidden');
+      }
+
+
+      function cancelHistoryEdit() {
+          openHistoryDetail(selectedHistoryIndex); 
+      }
+
+
+      function saveHistoryEdit() {
+          showAlert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อย');
+          openHistoryDetail(selectedHistoryIndex); 
+      }
+
+
+      function addHistoryIdImage() {
+          openCamera('history_idcard');
+      }
+
+
+      function closeHistoryDetail() {
+          document.getElementById('historyDetailModal').classList.add('hidden');
+          document.getElementById('historyDetailModal').classList.remove('flex');
+      }
+
+
+      function printHistoryDetail() {
+          if (selectedHistoryIndex === -1) return;
+          const item = historyData[selectedHistoryIndex];
+          const printWindow = window.open('', '', 'width=800,height=800');
+          const cleanEnDate = (item.entryDateDisplay === 'undefined') ? '-' : (item.entryDateDisplay || '-');
+          const cleanExDate = (item.exitDateDisplay === 'undefined') ? '-' : (item.exitDateDisplay || '-');
+          
+          let imagesHtml = '';
+          if(item.slipImg) imagesHtml += `<div style="text-align:center; margin-top:20px; border:1px solid #eee; padding:10px; border-radius:8px;"><div style="font-size:14px; font-weight:bold; margin-bottom:5px; color:#555;">หลักฐานการโอนเงิน</div><img src="${item.slipImg}" style="max-width:100%; max-height:600px; object-fit:contain;"></div>`;
+
+
+          printWindow.document.write(`<html><head><title>Print Receipt</title><link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet"><style>@page { size: A4; margin: 15mm; } body { font-family: 'Sarabun', sans-serif; padding: 20px; color: #333; line-height: 1.6; } .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; } .title { font-size: 28px; font-weight: bold; margin: 0; letter-spacing: 1px; } .subtitle { font-size: 16px; color: #666; } .info-container { font-size: 16px; margin-bottom: 20px; } .info-row { display: flex; margin-bottom: 8px; } .label { font-weight: bold; width: 100px; flex-shrink: 0; } .value { flex-grow: 1; } .price-row { color: #FF3B30; font-weight: bold; font-size: 20px; margin-top: 10px; } .footer { font-size: 10px; color: #999; text-align: center; margin-top: 40px; } </style></head><body><div class="container"><div class="header"><h1 class="title">BANGKOK H<span style="color:#FF3B30">O</span>RIZON</h1><p class="subtitle">บันทึกรายการจอดรถ</p></div><div class="info-container"><div class="info-row"><span class="label">เลขห้อง:</span><span class="value">${item.roomNo}</span></div><div class="info-row"><span class="label">เลขบัตร:</span><span class="value">${item.cardId}</span></div><div class="info-row"><span class="label">เข้า:</span><span class="value">${cleanEnDate} ${item.entryTime}</span></div><div class="info-row"><span class="label">ออก:</span><span class="value">${cleanExDate} ${item.exitTime}</span></div><div class="info-row price-row"><span class="label" style="color:#FF3B30;">ยอดชำระ:</span><span class="value">${item.price} บาท</span></div></div>${imagesHtml}<div class="footer">พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</div></div></body></html>`);
+          printWindow.document.close();
+          setTimeout(() => { printWindow.focus(); printWindow.print(); printWindow.close(); }, 800);
+      }
+
+
+      // --- NEW: Quick Search Logic (UPDATED UI) ---
+      function handleQuickSearch() {
+          const query = document.getElementById('quickSearchInput').value;
+          if(!query) return showAlert('แจ้งเตือน', 'กรุณากรอกทะเบียนหรือเลขห้อง');
+
+
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(showQuickSearchResults).quickSearchVehicle(query);
+      }
+
+
+      function showQuickSearchResults(res) {
+          toggleLoading(false);
+          const modal = document.getElementById('quickSearchModal');
+          const content = document.getElementById('quickSearchResultContent');
+          
+          if (!res.found) {
+              showAlert('ไม่พบข้อมูล', 'ไม่พบรถหรือห้องนี้ในระบบ');
+              return;
+          }
+
+
+          let html = '';
+          res.results.forEach(item => {
+              const bgClass = item.type === 'member' ? 'bg-blue-50 border-blue-100' : 'bg-orange-50 border-orange-100';
+              
+              html += `
+                <div class="p-4 rounded-xl border ${bgClass} mb-3 relative">
+                    <div class="absolute top-3 right-3 text-xs font-bold ${item.type === 'member' ? 'text-blue-400' : 'text-orange-400'}">
+                        ${item.source}
+                    </div>
+                    
+                    <div class="flex items-start"> 
+                        <div class="w-full">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="font-bold text-gray-900 text-lg">${item.room}</span>
+                                <span class="bg-white px-2 py-0.5 rounded text-sm font-bold text-gray-700 shadow-sm border border-gray-100">${item.plate}</span>
+                            </div>
+                            <div class="text-sm text-gray-600">${item.name}</div>
+                            <div class="text-xs text-gray-400 mt-1">${item.info}</div>
+                            ${item.phone && item.phone !== '-' ? `<a href="tel:${item.phone}" class="inline-block mt-2 text-xs bg-white border border-gray-200 px-3 py-1 rounded-full text-green-600 font-bold"><i class="fas fa-phone-alt mr-1"></i> โทร</a>` : ''}
+                        </div>
+                    </div>
+                    ${item.note ? `<div class="mt-2 text-xs text-gray-500 bg-white/50 p-1 rounded">${item.note}</div>` : ''}
+                </div>
+              `;
+          });
+
+
+          content.innerHTML = html;
+          modal.classList.remove('hidden');
+          modal.classList.add('flex');
+      }
+
+
+      function closeQuickSearchModal() {
+          document.getElementById('quickSearchModal').classList.add('hidden');
+          document.getElementById('quickSearchModal').classList.remove('flex');
+          document.getElementById('quickSearchInput').value = ''; 
+      }
+
+
+      function loadLicenseData() {
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              licenseData = res; 
+              renderLicenseList();
+          }).getLicenseList();
+      }
+
+      function renderLicenseList() {
+          const data = licenseData || []; 
+          const container = document.getElementById('licenseListContainer');
+          const searchVal = document.getElementById('licenseSearchInput').value.trim().toLowerCase();
+          
+          let html = '';
+          const filtered = data.filter(item => {
+              const p = item.plate ? item.plate.toString().toLowerCase() : "";
+              const r = item.room ? item.room.toString().toLowerCase() : "";
+              const n = item.name ? item.name.toString().toLowerCase() : "";
+              return p.includes(searchVal) || r.includes(searchVal) || n.includes(searchVal);
+          });
+
+
+          if (filtered.length === 0) {
+              container.innerHTML = `<div class="text-center py-12 text-gray-300 flex flex-col items-center"><i class="fas fa-car-crash text-4xl mb-3"></i><span>ไม่มีข้อมูล</span></div>`;
+              return;
+          }
+
+
+          filtered.forEach(item => {
+              let imgHtml = ``; 
+              html += `
+                <div onclick="openLicenseDetail(${item.id})" class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm mb-3 active:scale-98 transition cursor-pointer relative">
+                    <div class="flex justify-between items-start gap-3">
+                        ${imgHtml}
+                        <div class="flex-grow">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="font-bold text-gray-800 text-lg">${item.room}</span>
+                                <span class="text-xs bg-gray-100 px-1.5 rounded text-gray-500 font-bold">${item.plate}</span>
+                            </div>
+                            <div class="text-xs text-gray-600 font-medium">${item.name}</div>
+                        </div>
+                    </div>
+                </div>
+              `;
+          });
+          container.innerHTML = html;
+      }
+
+      function openLicenseDetail(id) {
+          const data = licenseData || [];
+          const item = data.find(i => i.id === id);
+          if(!item) return;
+          
+          currentRecord = item; 
+          licenseEditImg = null; 
+
+
+          document.getElementById('detailLicRoom').innerText = item.room;
+          document.getElementById('detailLicPlate').innerText = item.plate;
+          document.getElementById('detailLicName').innerText = item.name || '-';
+          
+          const phoneDisplay = item.phone ? `<a href="tel:${item.phone}" class="text-blue-600 underline">${item.phone}</a>` : '-';
+          document.getElementById('detailLicPhone').innerHTML = phoneDisplay;
+          
+          document.getElementById('detailLicNote').innerText = item.note || '-';
+          document.getElementById('detailLicRights').innerText = (item.rights || '1') + ' คัน';
+
+
+          document.getElementById('editLicRoom').value = item.room;
+          document.getElementById('editLicPlate').value = item.plate;
+          document.getElementById('editLicName').value = item.name || '';
+          document.getElementById('editLicPhone').value = item.phone || '';
+          document.getElementById('editLicNote').value = item.note || '';
+          document.getElementById('editLicRights').value = item.rights || '1';
+
+
+          const imgEl = document.getElementById('detailLicImg');
+          const placeholder = document.getElementById('detailLicImgPlaceholder');
+          const imgOverlay = document.getElementById('detailLicImgOverlay'); 
+          
+          const imgContainer = document.getElementById('detailLicImgContainer');
+          
+          imgContainer.onclick = () => {
+              if (!document.getElementById('licDetailEditControls').classList.contains('hidden')) {
+                  triggerFileUpload('license_update');
+              } else {
+                  if(imgEl.src && !imgEl.classList.contains('hidden')) viewFullImage(imgEl.src);
+              }
+          };
+
+
+          if(item.img) {
+              imgEl.src = fixDriveLink(item.img);
+              imgEl.classList.remove('hidden');
+              placeholder.classList.add('hidden');
+          } else {
+              imgEl.classList.add('hidden');
+              placeholder.classList.remove('hidden');
+          }
+          
+          if(imgOverlay) imgOverlay.classList.add('hidden');
+
+
+          setLicenseEditMode(false);
+
+
+          document.getElementById('licenseDetailModal').classList.remove('hidden');
+          document.getElementById('licenseDetailModal').classList.add('flex');
+      }
+
+
+      function closeLicenseDetail() {
+          document.getElementById('licenseDetailModal').classList.add('hidden');
+          document.getElementById('licenseDetailModal').classList.remove('flex');
+      }
+
+
+      function enableLicenseEdit() {
+          requestAdminPin(() => {
+              setLicenseEditMode(true);
+          });
+      }
+      
+      function cancelLicenseEdit() {
+          setLicenseEditMode(false);
+          openLicenseDetail(currentRecord.id); 
+      }
+
+
+      function saveLicenseEdit() {
+          const id = currentRecord.id;
+          const room = document.getElementById('editLicRoom').value;
+          const plate = document.getElementById('editLicPlate').value;
+          const name = document.getElementById('editLicName').value;
+          const phone = document.getElementById('editLicPhone').value;
+          const note = document.getElementById('editLicNote').value;
+          const rights = document.getElementById('editLicRights').value;
+
+
+          if(!room || !plate) return showAlert('แจ้งเตือน', 'กรุณากรอกข้อมูลสำคัญ');
+
+
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              if(res.success) {
+                  // Update local
+                  currentRecord.room = room;
+                  currentRecord.plate = plate;
+                  currentRecord.name = name;
+                  currentRecord.phone = phone;
+                  currentRecord.note = note;
+                  currentRecord.rights = rights;
+                  if (licenseEditImg) currentRecord.img = licenseEditImg; 
+                  
+                  showAlert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อย');
+                  openLicenseDetail(id); 
+                  loadLicenseData(); 
+              }
+          }).updateLicensePlate({ 
+              id, room, plate, name, phone, note, rights, 
+              img: licenseEditImg 
+          });
+      }
+
+
+      function deleteCurrentLicense() {
+          if(!currentRecord) return;
+          showConfirm("ยืนยันการลบ", "คุณต้องการลบรายการนี้?", () => {
+             toggleLoading(true);
+             google.script.run.withSuccessHandler(res => {
+                 toggleLoading(false);
+                 closeLicenseDetail();
+                 if(res.success) loadLicenseData();
+             }).deleteLicensePlate(currentRecord.id);
+          });
+      }
+
+
+      function setLicenseEditMode(isEdit) {
+          const els = ['LicRoom', 'LicPlate', 'LicName', 'LicPhone', 'LicNote', 'LicRights'];
+          els.forEach(key => {
+              if(isEdit) {
+                  document.getElementById('detail'+key).classList.add('hidden');
+                  document.getElementById('edit'+key).classList.remove('hidden');
+                  if(key === 'LicPhone') document.getElementById('detail'+key).parentElement.classList.add('hidden');
+              } else {
+                  document.getElementById('detail'+key).classList.remove('hidden');
+                  document.getElementById('edit'+key).classList.add('hidden');
+                  if(key === 'LicPhone') document.getElementById('detail'+key).parentElement.classList.remove('hidden');
+              }
+          });
+
+
+          const imgOverlay = document.getElementById('detailLicImgOverlay');
+          
+          if(isEdit) {
+              document.getElementById('licDetailViewControls').classList.add('hidden');
+              document.getElementById('licDetailEditControls').classList.remove('hidden');
+              document.getElementById('licDeleteBtn').classList.remove('hidden'); 
+              if(imgOverlay) imgOverlay.classList.remove('hidden'); 
+          } else {
+              document.getElementById('licDetailViewControls').classList.remove('hidden');
+              document.getElementById('licDetailEditControls').classList.add('hidden');
+              document.getElementById('licDeleteBtn').classList.add('hidden'); 
+              if(imgOverlay) imgOverlay.classList.add('hidden'); 
+          }
+      }
+
+
+      // --- OWNER LIST LOGIC (NEW) ---
+      function loadOwnerData() {
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              ownerData = res;
+              renderOwnerList();
+          }).getOwnerList();
+      }
+
+      function renderOwnerList() {
+          const data = ownerData || [];
+          const container = document.getElementById('ownerListContainer');
+          const searchVal = document.getElementById('ownerSearchInput').value.trim().toLowerCase();
+          
+          let html = '';
+          const filtered = data.filter(item => {
+              const r = item.room ? item.room.toString().toLowerCase() : "";
+              const n = item.name ? item.name.toString().toLowerCase() : "";
+              return r.includes(searchVal) || n.includes(searchVal);
+          });
+
+
+          if (filtered.length === 0) {
+              container.innerHTML = `<div class="text-center py-12 text-gray-300 flex flex-col items-center"><i class="fas fa-user-slash text-4xl mb-3"></i><span>ไม่มีข้อมูล</span></div>`;
+              return;
+          }
+
+
+          filtered.forEach(item => {
+              html += `
+                <div onclick="openOwnerDetail(${item.id})" class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm mb-3 active:scale-98 transition cursor-pointer">
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-xs">${item.room}</div>
+                            <div>
+                                <div class="font-bold text-gray-800">${item.name}</div>
+                                <div class="text-xs text-gray-500">${item.phone1 || '-'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+              `;
+          });
+          container.innerHTML = html;
+      }
+
+      function openOwnerDetail(id) {
+          const data = ownerData || [];
+          const item = data.find(i => i.id === id);
+          if(!item) return;
+          
+          currentRecord = item;
+
+
+          document.getElementById('detailOwnerRoom').innerText = item.room;
+          document.getElementById('detailOwnerName').innerText = item.name;
+          document.getElementById('detailOwnerFloor').innerText = item.floor || '-';
+          document.getElementById('detailOwnerSize').innerText = item.size || '-';
+          
+          document.getElementById('detailOwnerPhone1').innerHTML = item.phone1 ? `<a href="tel:${item.phone1}" class="text-blue-600 underline">${item.phone1}</a>` : '-';
+          document.getElementById('detailOwnerPhone2').innerHTML = item.phone2 ? `<a href="tel:${item.phone2}" class="text-blue-600 underline">${item.phone2}</a>` : '-';
+          
+          document.getElementById('detailOwnerNote').innerText = item.note || '-';
+
+
+          document.getElementById('editOwnerRoom').value = item.room;
+          document.getElementById('editOwnerName').value = item.name;
+          document.getElementById('editOwnerFloor').value = item.floor || '';
+          document.getElementById('editOwnerSize').value = item.size || '';
+          document.getElementById('editOwnerPhone1').value = item.phone1 || '';
+          document.getElementById('editOwnerPhone2').value = item.phone2 || '';
+          document.getElementById('editOwnerNote').value = item.note || '';
+
+
+          setOwnerEditMode(false);
+
+
+          document.getElementById('ownerDetailModal').classList.remove('hidden');
+          document.getElementById('ownerDetailModal').classList.add('flex');
+      }
+
+
+      function closeOwnerDetail() {
+          document.getElementById('ownerDetailModal').classList.add('hidden');
+          document.getElementById('ownerDetailModal').classList.remove('flex');
+      }
+
+
+      function enableOwnerEdit() {
+          requestAdminPin(() => {
+              setOwnerEditMode(true);
+          });
+      }
+
+
+      function cancelOwnerEdit() {
+          setOwnerEditMode(false);
+          openOwnerDetail(currentRecord.id);
+      }
+
+
+      function saveOwnerEdit() {
+          const id = currentRecord.id;
+          const room = document.getElementById('editOwnerRoom').value;
+          const name = document.getElementById('editOwnerName').value;
+          const floor = document.getElementById('editOwnerFloor').value;
+          const size = document.getElementById('editOwnerSize').value;
+          const phone1 = document.getElementById('editOwnerPhone1').value;
+          const phone2 = document.getElementById('editOwnerPhone2').value;
+          const note = document.getElementById('editOwnerNote').value;
+
+
+          if(!room || !name) return showAlert('แจ้งเตือน', 'กรุณากรอกห้องและชื่อ');
+
+
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              if(res.success) {
+                  // Update local
+                  currentRecord.room = room;
+                  currentRecord.name = name;
+                  currentRecord.floor = floor;
+                  currentRecord.size = size;
+                  currentRecord.phone1 = phone1;
+                  currentRecord.phone2 = phone2;
+                  currentRecord.note = note;
+                  
+                  showAlert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อย');
+                  openOwnerDetail(id);
+                  loadOwnerData();
+              }
+          }).updateOwner({ id, room, name, floor, size, phone1, phone2, note });
+      }
+
+
+      function deleteCurrentOwner() {
+          if(!currentRecord) return;
+          showConfirm("ยืนยันการลบ", "คุณต้องการลบรายการนี้?", () => {
+             toggleLoading(true);
+             google.script.run.withSuccessHandler(res => {
+                 toggleLoading(false);
+                 closeOwnerDetail();
+                 if(res.success) loadOwnerData();
+             }).deleteOwner(currentRecord.id);
+          });
+      }
+
+
+      function setOwnerEditMode(isEdit) {
+          const els = ['OwnerRoom', 'OwnerName', 'OwnerFloor', 'OwnerSize', 'OwnerPhone1', 'OwnerPhone2', 'OwnerNote'];
+          els.forEach(key => {
+              if(isEdit) {
+                  document.getElementById('detail'+key).classList.add('hidden');
+                  document.getElementById('edit'+key).classList.remove('hidden');
+                  if(key === 'OwnerPhone1') document.getElementById('detail'+key).parentElement.classList.add('hidden');
+                  if(key === 'OwnerPhone2') document.getElementById('detail'+key).parentElement.classList.add('hidden');
+              } else {
+                  document.getElementById('detail'+key).classList.remove('hidden');
+                  document.getElementById('edit'+key).classList.add('hidden');
+                  if(key === 'OwnerPhone1') document.getElementById('detail'+key).parentElement.classList.remove('hidden');
+                  if(key === 'OwnerPhone2') document.getElementById('detail'+key).parentElement.classList.remove('hidden');
+              }
+          });
+
+
+          if(isEdit) {
+              document.getElementById('ownerDetailViewControls').classList.add('hidden');
+              document.getElementById('ownerDetailEditControls').classList.remove('hidden');
+              document.getElementById('ownerDeleteBtn').classList.remove('hidden');
+          } else {
+              document.getElementById('ownerDetailViewControls').classList.remove('hidden');
+              document.getElementById('ownerDetailEditControls').classList.add('hidden');
+              document.getElementById('ownerDeleteBtn').classList.add('hidden');
+          }
+      }
+
+
+      function openAddOwnerModal() {
+          requestAdminPin(() => {
+              document.getElementById('addOwnerRoom').value = "";
+              document.getElementById('addOwnerName').value = "";
+              document.getElementById('addOwnerFloor').value = "";
+              document.getElementById('addOwnerSize').value = "";
+              document.getElementById('addOwnerPhone1').value = "";
+              document.getElementById('addOwnerPhone2').value = "";
+              document.getElementById('addOwnerNote').value = "";
+              
+              document.getElementById('addOwnerModal').classList.remove('hidden');
+              document.getElementById('addOwnerModal').classList.add('flex');
+          });
+      }
+
+
+      function closeAddOwnerModal() {
+          document.getElementById('addOwnerModal').classList.add('hidden');
+          document.getElementById('addOwnerModal').classList.remove('flex');
+      }
+
+
+      function submitOwnerAdd() {
+          const room = document.getElementById('addOwnerRoom').value;
+          const name = document.getElementById('addOwnerName').value;
+          const floor = document.getElementById('addOwnerFloor').value;
+          const size = document.getElementById('addOwnerSize').value;
+          const phone1 = document.getElementById('addOwnerPhone1').value;
+          const phone2 = document.getElementById('addOwnerPhone2').value;
+          const note = document.getElementById('addOwnerNote').value;
+
+
+          if(!room || !name) return showAlert('แจ้งเตือน', 'กรุณากรอกห้องและชื่อ');
+
+
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              closeAddOwnerModal();
+              if(res.success) {
+                  showAlert('สำเร็จ', 'เพิ่มรายชื่อเรียบร้อย');
+                  loadOwnerData();
+              }
+          }).addOwner({ room, name, floor, size, phone1, phone2, note });
+      }
+
+
+      // --- TEMP PARKING LOGIC ---
+      function loadTempData() {
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              tempActiveData = res.active || [];
+              tempHistoryData = res.history || [];
+              renderTempList();
+          }).getAllTempData();
+      }
+
+
+      function switchTempTab(tab) {
+          currentTempTab = tab;
+          const activeClass = "flex-1 py-3 text-center text-sm font-bold text-ios-red border-b-4 border-ios-red bg-white transition cursor-pointer";
+          const inactiveClass = "flex-1 py-3 text-center text-sm font-medium text-gray-400 border-b border-gray-100 hover:text-gray-600 bg-white transition cursor-pointer";
+
+
+          document.getElementById('tabTempActive').className = tab === 'active' ? activeClass : inactiveClass;
+          document.getElementById('tabTempHistory').className = tab === 'history' ? activeClass : inactiveClass;
+          
+          renderTempList();
+      }
+
+
+      function renderTempList() {
+          const searchVal = document.getElementById('tempSearchInput').value.trim().toLowerCase();
+          
+          let targetData;
+          if (searchVal) {
+              targetData = [...tempActiveData, ...tempHistoryData];
+          } else {
+              targetData = currentTempTab === 'active' ? tempActiveData : tempHistoryData;
+          }
+
+
+          const container = document.getElementById('tempListContainer');
+          
+          let html = '';
+          const filtered = targetData.filter(item => {
+              const r = item.room ? item.room.toString().toLowerCase() : "";
+              const p = item.plate ? item.plate.toString().toLowerCase() : "";
+              return r.includes(searchVal) || p.includes(searchVal);
+          });
+
+
+          if (filtered.length === 0) {
+              container.innerHTML = `<div class="text-center py-12 text-gray-300 flex flex-col items-center"><i class="fas fa-inbox text-4xl mb-3"></i><span>ไม่มีรายการ</span></div>`;
+              return;
+          }
+
+
+          filtered.forEach(item => {
+              let statusBadge = '';
+              
+              if (item.status === 'Waiting') {
+                  statusBadge = '<span class="bg-orange-100 text-orange-600 px-2 py-0.5 rounded text-[10px] font-bold">รอเข้า</span>';
+              } else if (item.status === 'Parked') {
+                  statusBadge = '<span class="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-[10px] font-bold">จอดอยู่</span>';
+              } else if (item.status === 'Expired') {
+                  statusBadge = '<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-[10px] font-bold">หมดเวลา</span>';
+              } else if (item.status === 'Cancelled') {
+                  statusBadge = '<span class="bg-red-50 text-red-500 px-2 py-0.5 rounded text-[10px] font-bold">ยกเลิก</span>';
+              } else {
+                  statusBadge = '<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-[10px] font-bold">จบงาน</span>';
+              }
+
+
+              html += `
+                <div onclick="openTempDetail(${item.rowIndex})" class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm mb-3 active:scale-98 transition cursor-pointer">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="font-bold text-gray-800 text-lg">${item.room}</span>
+                                <span class="text-xs bg-gray-100 px-1.5 rounded text-gray-500">${item.plate}</span>
+                            </div>
+                            <div class="text-xs text-gray-500 space-y-0.5">
+                                <div><i class="far fa-calendar-check text-green-500 w-4"></i> ${item.startTimeDisplay}</div>
+                                <div><i class="far fa-calendar-times text-red-400 w-4"></i> ${item.endTimeDisplay}</div>
+                            </div>
+                        </div>
+                        <div class="text-right flex flex-col items-end gap-2">
+                            ${statusBadge}
+                        </div>
+                    </div>
+                </div>
+              `;
+          });
+          container.innerHTML = html;
+      }
+
+
+      function openTempDetail(rowIndex) {
+          const item = [...tempActiveData, ...tempHistoryData].find(i => i.rowIndex === rowIndex);
+          if (!item) return;
+
+
+          currentRecord = item;
+          isTempEditMode = false; 
+
+
+          document.getElementById('tempDetailModal').classList.remove('hidden');
+          document.getElementById('tempDetailModal').classList.add('flex');
+          
+          document.getElementById('viewTempRoom').innerText = item.room;
+          document.getElementById('viewTempPlate').innerText = item.plate;
+          
+          document.getElementById('editTempRoom').value = item.room;
+          document.getElementById('editTempPlate').value = item.plate;
+
+
+          document.getElementById('detailTempStart').innerText = item.startTimeDisplay;
+          document.getElementById('detailTempEnd').innerText = item.endTimeDisplay;
+          document.getElementById('detailTempStatus').innerText = item.status;
+
+
+          const imgEl = document.getElementById('detailTempImg');
+          const placeholder = document.getElementById('detailTempImgPlaceholder');
+          const container = document.getElementById('detailTempImgContainer');
+          
+          document.getElementById('detailTempImgOverlay').classList.add('hidden');
+          
+          if (item.plateImg) {
+              imgEl.src = fixDriveLink(item.plateImg);
+              imgEl.classList.remove('hidden');
+              placeholder.classList.add('hidden');
+          } else {
+              imgEl.classList.add('hidden');
+              placeholder.classList.remove('hidden');
+          }
+
+
+          document.getElementById('tempDetailViewControls').classList.remove('hidden');
+          document.getElementById('tempDetailEditControls').classList.add('hidden');
+          
+          document.getElementById('viewTempRoom').classList.remove('hidden');
+          document.getElementById('editTempRoom').classList.add('hidden');
+          document.getElementById('viewTempPlate').classList.remove('hidden');
+          document.getElementById('editTempPlate').classList.add('hidden');
+          
+          document.getElementById('tempDetailDeleteBtn').classList.remove('hidden');
+      }
+
+
+      function enableTempEdit() {
+          requestAdminPin(() => { 
+              isTempEditMode = true;
+              
+              document.getElementById('viewTempRoom').classList.add('hidden');
+              document.getElementById('editTempRoom').classList.remove('hidden');
+              document.getElementById('viewTempPlate').classList.add('hidden');
+              document.getElementById('editTempPlate').classList.remove('hidden');
+              
+              document.getElementById('detailTempImgOverlay').classList.remove('hidden');
+
+
+              document.getElementById('tempDetailViewControls').classList.add('hidden');
+              document.getElementById('tempDetailEditControls').classList.remove('hidden');
+              document.getElementById('tempDetailEditBtn').classList.add('hidden');
+          });
+      }
+
+
+      function cancelTempEdit() {
+          openTempDetail(currentRecord.rowIndex);
+      }
+
+
+      function saveTempEdit() {
+          const newRoom = document.getElementById('editTempRoom').value;
+          const newPlate = document.getElementById('editTempPlate').value;
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              if(res.success) {
+                   currentRecord.room = newRoom;
+                   currentRecord.plate = newPlate;
+                   openTempDetail(currentRecord.rowIndex);
+                   loadTempData(); 
+                   showAlert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อย');
+              } else {
+                  showAlert('ผิดพลาด', 'บันทึกไม่สำเร็จ');
+              }
+          }).updateTempEntry({
+              rowIndex: currentRecord.rowIndex,
+              room: newRoom,
+              plate: newPlate
+          });
+      }
+
+
+      function closeTempDetail() {
+          document.getElementById('tempDetailModal').classList.add('hidden');
+          document.getElementById('tempDetailModal').classList.remove('flex');
+      }
+
+
+      function deleteCurrentTemp() {
+          if (!currentRecord) return;
+          requestAdminPin(() => {
+              showConfirm("ยืนยันการลบ", "คุณต้องการยกเลิกรายการนี้?", () => {
+                  toggleLoading(true);
+                  google.script.run.withSuccessHandler(res => {
+                      toggleLoading(false);
+                      closeTempDetail();
+                      if(res.success) loadTempData(); 
+                  }).deleteTempEntry(currentRecord.rowIndex);
+              });
+          });
+      }
+
+
+      function deleteTempItem(rowIndex) {
+          requestAdminPin(() => {
+              showConfirm("ยืนยันการลบ", "คุณต้องการยกเลิกรายการนี้?", () => {
+                  toggleLoading(true);
+                  google.script.run.withSuccessHandler(res => {
+                      toggleLoading(false);
+                      if(res.success) loadTempData(); 
+                  }).deleteTempEntry(rowIndex);
+              });
+          });
+      }
+
+
+      // --- FULL IMAGE VIEW LOGIC (NEW) ---
+      function handleTempImgClick() {
+          if (isTempEditMode) {
+              addTempImageLater();
+          } else {
+              const img = document.getElementById('detailTempImg');
+              if (img.src && !img.classList.contains('hidden')) {
+                  viewFullImage(img.src);
+              }
+          }
+      }
+
+
+      function handleHistoryImgClick(type) {
+          if (isHistoryEditMode) {
+              openCamera('history_' + type);
+          } else {
+              let imgId = '';
+              if(type === 'plate') imgId = 'histDetailPlateImg';
+              else if(type === 'slip') imgId = 'histDetailSlipImg';
+              else if(type === 'idcard') imgId = 'histDetailIdImg';
+              
+              const img = document.getElementById(imgId);
+              if (img && img.src && !img.classList.contains('hidden')) {
+                  viewFullImage(img.src);
+              }
+          }
+      }
+
+
+      function viewFullImage(src) {
+          const modal = document.getElementById('fullImageModal');
+          const preview = document.getElementById('fullImagePreview');
+          preview.src = src;
+          modal.classList.remove('hidden');
+      }
+
+
+      function closeFullImage() {
+          document.getElementById('fullImageModal').classList.add('hidden');
+      }
+      
+      // --- FILE UPLOAD LOGIC ---
+      function triggerFileUpload(type) {
+          targetPhotoType = type;
+          document.getElementById('fileInput').click();
+      }
+
+
+      function handleFileSelect(input) {
+          if (input.files && input.files[0]) {
+              const file = input.files[0];
+              const reader = new FileReader();
+              
+              toggleLoading(true); 
+              
+              reader.onload = function(e) {
+                  setTimeout(() => {
+                      toggleLoading(false);
+                      savePhoto(e.target.result); 
+                  }, 500);
+              }
+              
+              reader.readAsDataURL(file);
+          }
+          input.value = ''; 
+      }
+
+
+      function addTempImageLater() {
+          triggerFileUpload('temp_update');
+      }
+
+
+      function generateTimeOptions(selectedHour) {
+          let options = '';
+          for (let i = 0; i < 24; i++) {
+              const hourStr = i.toString().padStart(2, '0');
+              const isSelected = (hourStr === selectedHour) ? 'selected' : '';
+              options += `<option value="${hourStr}" ${isSelected}>${hourStr}:00</option>`;
+          }
+          return options;
+      }
+
+
+      function openAddLicenseModal() {
+          requestAdminPin(() => {  
+              document.getElementById('licPlate').value = "";
+              document.getElementById('licRoom').value = "";
+              document.getElementById('licName').value = "";
+              document.getElementById('licPhone').value = "";
+              document.getElementById('licNote').value = ""; 
+              document.getElementById('licParkingRights').value = ""; 
+
+
+              licenseAddImg = null;
+              document.getElementById('licImgPreview').classList.add('hidden');
+              document.getElementById('licImgPlaceholder').classList.remove('hidden');
+
+
+              document.getElementById('addLicenseModal').classList.remove('hidden');
+              document.getElementById('addLicenseModal').classList.add('flex');
+          }); 
+      }
+      
+      function closeAddLicenseModal() {
+          document.getElementById('addLicenseModal').classList.add('hidden');
+          document.getElementById('addLicenseModal').classList.remove('flex');
+      }
+      
+      function closeAddTempModal() {
+          document.getElementById('addTempModal').classList.add('hidden');
+          document.getElementById('addTempModal').classList.remove('flex');
+      }
+      
+      function captureTempAddImage() {
+          triggerFileUpload('temp_add');
+      }
+
+
+      function submitTempAdd() {
+          const room = document.getElementById('tempRoom').value;
+          const plate = document.getElementById('tempPlate').value;
+          const startDate = document.getElementById('tempStartDate').value;
+          const startHour = document.getElementById('tempStartHour').value;
+          const endDate = document.getElementById('tempEndDate').value;
+          const endHour = document.getElementById('tempEndHour').value;
+
+
+          if(!room || !plate || !startDate || !endDate) return showAlert('แจ้งเตือน', 'กรุณากรอกข้อมูลให้ครบ', 'error');
+
+
+          const data = { 
+              room, plate, startDate, startHour, endDate, endHour,
+              plateImg: tempAddPlateImg 
+          };
+          
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              closeAddTempModal();
+              if(res.success) {
+                  showAlert('สำเร็จ', 'เพิ่มข้อมูลเรียบร้อย');
+                  document.getElementById('tempRoom').value = "";
+                  document.getElementById('tempPlate').value = "";
+                  tempAddPlateImg = null;
+                  loadTempData(); 
+              } else {
+                  showAlert('ผิดพลาด', 'ไม่สามารถบันทึกได้', 'error');
+              }
+          }).addManualTempEntry(data);
+      }
+      
+      function savePhoto(base64) {
+          if (targetPhotoType === 'plate') {
+              currentPlateImg = base64;
+              document.getElementById('platePreview').src = base64;
+              document.getElementById('platePreview').classList.remove('hidden');
+              document.getElementById('platePlaceholder').classList.add('hidden');
+              document.getElementById('plateImageContainer').classList.remove('h-32');
+              document.getElementById('plateImageContainer').classList.add('aspect-square');
+
+
+          } else if (targetPhotoType === 'slip') {
+              currentSlipImg = base64;
+              document.getElementById('slipPreview').src = base64;
+              document.getElementById('slipPreview').classList.remove('hidden');
+              document.getElementById('slipPlaceholder').classList.add('hidden');
+              document.getElementById('slipImageContainer').classList.remove('h-32');
+              document.getElementById('slipImageContainer').classList.add('aspect-square');
+
+
+          } else if (targetPhotoType === 'temp_add') {
+              tempAddPlateImg = base64;
+              const img = document.getElementById('addTempImgPreview');
+              img.src = base64;
+              img.classList.remove('hidden');
+              document.getElementById('addTempImgPlaceholder').classList.add('hidden');
+
+
+          } else if (targetPhotoType === 'temp_update') {
+              toggleLoading(true);
+              google.script.run.withSuccessHandler(res => {
+                  toggleLoading(false);
+                  if (res.success) {
+                      const imgEl = document.getElementById('detailTempImg');
+                      const placeholder = document.getElementById('detailTempImgPlaceholder');
+                      imgEl.src = res.url;
+                      imgEl.classList.remove('hidden');
+                      placeholder.classList.add('hidden');
+                      loadTempData(); 
+                      showAlert('สำเร็จ', 'อัปเดตรูปเรียบร้อย');
+                  } else {
+                      showAlert('ผิดพลาด', res.message || 'บันทึกไม่สำเร็จ');
+                  }
+              }).updateTempImage({ rowIndex: currentRecord.rowIndex, image: base64, room: currentRecord.room, type: 'plate' });
+
+
+          } else if (targetPhotoType === 'history_idcard') {
+              toggleLoading(true);
+              google.script.run
+                .withSuccessHandler(res => {
+                    toggleLoading(false);
+                    if (res.success) {
+                        const imgEl = document.getElementById('histDetailIdImg');
+                        const placeholder = document.getElementById('histDetailIdPlaceholder');
+                        imgEl.src = res.url;
+                        imgEl.classList.remove('hidden');
+                        placeholder.classList.add('hidden');
+                        
+                        if(currentRecord) currentRecord.idCardImg = res.url;
+                        
+                        showAlert('สำเร็จ', 'อัปโหลดรูปบัตรเรียบร้อย');
+                    } else {
+                        showAlert('ผิดพลาด', res.message || 'บันทึกรูปไม่สำเร็จ');
+                    }
+                })
+                .withFailureHandler(err => {
+                    toggleLoading(false);
+                    console.error(err);
+                    showAlert('ผิดพลาด', 'เกิดข้อผิดพลาดในการส่งข้อมูล');
+                })
+                .saveRecordImage({ 
+                    sheetName: currentRecord.sheetName || 'Visitor_Log', 
+                    rowIndex: currentRecord.rowIndex, 
+                    cardId: currentRecord.cardId, 
+                    imageType: 'idcard', 
+                    base64: base64 
+                });
+          } else if (targetPhotoType === 'license_add') {
+              licenseAddImg = base64;
+              const img = document.getElementById('licImgPreview');
+              img.src = base64;
+              img.classList.remove('hidden');
+              document.getElementById('licImgPlaceholder').classList.add('hidden');
+          } else if (targetPhotoType === 'license_update') {
+              licenseEditImg = base64;
+              const img = document.getElementById('detailLicImg');
+              const placeholder = document.getElementById('detailLicImgPlaceholder');
+              img.src = base64;
+              img.classList.remove('hidden');
+              placeholder.classList.add('hidden');
+          }
+      }
+
+
+      function closeCamera() {
+          const mockView = document.getElementById('mockCameraView');
+          if(mockView) mockView.classList.add('hidden');
+          const video = document.getElementById('cameraVideo');
+          video.classList.remove('hidden');
+          if (cameraStream) { cameraStream.getTracks().forEach(track => track.stop()); cameraStream = null; }
+          video.srcObject = null;
+          document.getElementById('cameraModal').classList.add('hidden');
+          document.getElementById('cameraModal').classList.remove('flex');
+      }
+
+
+      function openCamera(type) {
+        targetPhotoType = type;
+        if(type === 'plate' || type === 'slip' || type.startsWith('history_')) {
+            document.getElementById('cameraModal').classList.remove('hidden');
+            document.getElementById('cameraModal').classList.add('flex');
+            const video = document.getElementById('cameraVideo');
+            if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(stream => { cameraStream = stream; video.srcObject = stream; video.play(); video.classList.remove('hidden'); })
+                .catch(err => { console.log("Camera fail", err); useMockCamera(); });
+            } else { useMockCamera(); }
+        } else {
+            triggerFileUpload(type);
+        }
+      }
+
+
+      function useMockCamera() {
+          const video = document.getElementById('cameraVideo');
+          video.srcObject = null;
+          video.classList.add('hidden');
+          let mockView = document.getElementById('mockCameraView');
+          if (!mockView) {
+              mockView = document.createElement('div');
+              mockView.id = 'mockCameraView';
+              mockView.className = 'absolute inset-0 flex items-center justify-center text-white text-opacity-50';
+              mockView.innerText = '[ จำลองกล้องถ่ายรูป ]';
+              video.parentElement.appendChild(mockView);
+          }
+          mockView.classList.remove('hidden');
+      }
+
+
+      function takePhoto() {
+          const video = document.getElementById('cameraVideo');
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          let width = 640;
+          let height = 480;
+
+
+          if (cameraStream && video.readyState >= 2) {
+              width = video.videoWidth;
+              height = video.videoHeight;
+              
+              if (width > height) {
+                  if (width > MAX_WIDTH) {
+                      height *= MAX_WIDTH / width;
+                      width = MAX_WIDTH;
+                  }
+              } else {
+                  if (height > MAX_HEIGHT) {
+                      width *= MAX_HEIGHT / height;
+                      height = MAX_HEIGHT;
+                  }
+              }
+              
+              canvas.width = width;
+              canvas.height = height;
+              ctx.drawImage(video, 0, 0, width, height);
+          } else {
+              canvas.width = 640; canvas.height = 480;
+              ctx.fillStyle = "#e5e7eb"; ctx.fillRect(0,0,640,480);
+              ctx.fillStyle = "#9ca3af"; ctx.font="40px Sarabun"; ctx.textAlign="center"; 
+              let label = "รูปภาพ";
+              if(targetPhotoType === 'plate') label = "ทะเบียนรถ";
+              else if(targetPhotoType === 'slip') label = "สลิปโอนเงิน";
+              else if(targetPhotoType === 'history_idcard') label = "บัตรประชาชน";
+              ctx.fillText(label, 320, 240); ctx.font="20px Sarabun"; ctx.fillText("(จำลองภาพ)", 320, 280);
+          }
+          
+          const base64 = canvas.toDataURL('image/jpeg', 0.7);
+          savePhoto(base64);
+          closeCamera();
+      }
+
+
+      // --- QR SCANNER LOGIC ---
+      function startQrScanner() {
+          document.getElementById('qrModal').classList.remove('hidden');
+          document.getElementById('qrModal').classList.add('flex');
+          if(html5QrCode && html5QrCode.isScanning) return;
+          html5QrCode = new Html5Qrcode("reader");
+          html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, 
+              (decodedText) => { stopQrScanner(); document.getElementById('visitorCardId').value = decodedText; handleVisitorAction(); },
+              (errorMessage) => { }
+          ).catch(err => { console.log("Error scanner", err); closeQrModal(); document.getElementById('visitorCardId').value = "001"; handleVisitorAction(); });
+      }
+
+
+      function stopQrScanner() {
+        if (html5QrCode) {
+            html5QrCode.stop().then(() => { html5QrCode.clear(); closeQrModal(); }).catch(err => { try { html5QrCode.clear(); } catch(e) {} closeQrModal(); });
+        } else { closeQrModal(); }
+      }
+
+
+      function closeQrModal() {
+          document.getElementById('qrModal').classList.add('hidden');
+          document.getElementById('qrModal').classList.remove('flex');
+      }
+      
+      // Add License Image Handler 
+      function addLicenseImage() {
+          triggerFileUpload('license_add');
+      }
+      
+      // Open Add Temp Modal Handler
+      function openAddTempModal() {
+          requestAdminPin(() => {
+              const now = new Date();
+              const offset = now.getTimezoneOffset() * 60000;
+              const localISOTime = (new Date(now - offset)).toISOString().slice(0, 10);
+              
+              document.getElementById('tempStartDate').value = localISOTime;
+              document.getElementById('tempEndDate').value = localISOTime;
+              document.getElementById('tempRoom').value = "";
+              document.getElementById('tempPlate').value = "";
+              
+              tempAddPlateImg = null;
+              document.getElementById('addTempImgPreview').classList.add('hidden');
+              document.getElementById('addTempImgPlaceholder').classList.remove('hidden');
+
+
+              document.getElementById('tempStartHour').innerHTML = generateTimeOptions("09");
+              document.getElementById('tempEndHour').innerHTML = generateTimeOptions("18");
+              
+              document.getElementById('addTempModal').classList.remove('hidden');
+              document.getElementById('addTempModal').classList.add('flex');
+          });
+      }
+
+
+      // Submit License Add (with Fix)
+      function submitLicenseAdd() {
+          const plate = document.getElementById('licPlate').value;
+          const room = document.getElementById('licRoom').value;
+          const name = document.getElementById('licName').value;
+          const phone = document.getElementById('licPhone').value;
+          const note = document.getElementById('licNote').value;
+          // NEW: Get Rights
+          const rights = document.getElementById('licParkingRights').value;
+
+
+          if(!plate || !room) return showAlert('แจ้งเตือน', 'กรุณากรอกทะเบียนและเลขห้อง', 'error');
+
+
+          toggleLoading(true);
+          google.script.run.withSuccessHandler(res => {
+              toggleLoading(false);
+              closeAddLicenseModal();
+              if(res.success) {
+                  showAlert('สำเร็จ', res.message);
+                  loadLicenseData();
+              }
+          }).addLicensePlate({
+              plate, room, name, phone, note, rights,
+              plateImg: licenseAddImg
+          });
+      }
+    </script>
+  </head>
+  <body class="text-gray-900 font-sans antialiased h-screen flex flex-col overflow-hidden bg-ios-bg" onload="initHomeHeader()">
+
+
+    <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="handleFileSelect(this)">
+
+
+    <div id="loader" class="hidden fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm flex justify-center items-center">
+        <div class="bg-white p-5 rounded-2xl shadow-xl flex flex-col items-center animate-bounce">
+            <div class="w-10 h-10 border-4 border-ios-red border-t-transparent rounded-full animate-spin"></div>
+        </div>
+    </div>
+
+
+    <main class="flex-1 overflow-y-auto no-scrollbar p-4 pb-24 w-full max-w-md mx-auto pt-10">
+      
+      <div id="homeSection" class="view-section animate-fade-in h-full flex flex-col justify-center">
+        <div id="searchArea" class="w-full flex flex-col items-center text-center p-4">
+            <div id="homeHeaderDisplay" class="font-extrabold text-5xl tracking-tight text-gray-900 mb-8 scale-110 leading-tight transition-all duration-300">
+                </div>
+            
+            <div class="w-full relative mb-4 shadow-lg rounded-xl z-20">
+                <input type="number" id="visitorCardId" onkeydown="if(event.key === 'Enter') { this.blur(); handleVisitorAction(); }" class="w-full h-16 pl-6 pr-28 bg-white border-0 rounded-xl text-xl font-bold text-gray-800 focus:outline-none focus:ring-4 focus:ring-ios-red/20 transition shadow-sm placeholder-gray-300" placeholder="เลขบัตร Visitor...">
+                <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                    <button onclick="startQrScanner()" class="w-12 h-12 rounded-lg bg-gray-900 text-white shadow-md hover:bg-black active:scale-95 flex items-center justify-center transition"><i class="fas fa-qrcode text-lg"></i></button>
+                    <button onclick="handleVisitorAction()" class="w-12 h-12 rounded-lg bg-ios-red text-white shadow-md hover:bg-red-600 active:scale-95 flex items-center justify-center transition"><i class="fas fa-search text-lg"></i></button>
+               </div>
+            </div>
+
+
+        </div>
+
+
+        <div id="homeTempStatusContainer" class="w-full px-4 hidden pb-4"></div>
+
+
+        <div id="entryFormArea" class="hidden bg-white rounded-3xl shadow-lg border border-gray-100 p-6 mt-4 relative">
+            <button onclick="resetHome()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fas fa-arrow-right text-green-500"></i> บันทึกรถเข้า</h2>
+            <div class="space-y-4">
+                <div><label class="block text-xs font-bold text-gray-400 mb-1">เลขบัตร</label><input type="text" id="entryCardIdDisplay" readonly class="w-full h-10 bg-gray-100 rounded-lg px-3 text-gray-500 font-bold border-none"></div>
+                <div><label class="block text-xs font-bold text-gray-400 mb-1">เลขห้อง / ผู้ติดต่อ <span class="text-red-500">*</span></label><input type="number" id="entryRoomNo" onkeydown="if(event.key === 'Enter') { this.blur(); openCamera('plate'); }" class="w-full h-12 bg-white border border-gray-200 rounded-lg px-3 text-lg font-bold text-gray-800 focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" placeholder="เช่น 1204"></div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 mb-1">รูปทะเบียนรถ</label>
+                    <div id="plateImageContainer" onclick="openCamera('plate')" class="w-full h-32 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition relative overflow-hidden">
+                        <div id="platePlaceholder" class="flex flex-col items-center"><i class="fas fa-camera text-2xl text-gray-300 mb-1"></i><span class="text-xs text-gray-400">กดเพื่อถ่ายรูป</span></div>
+                        <img id="platePreview" class="hidden absolute inset-0 w-full h-full object-cover">
+                    </div>
+                </div>
+                <button onclick="submitEntry()" class="w-full h-12 bg-green-500 text-white font-bold rounded-xl shadow hover:bg-green-600 active:scale-95 transition mt-2">ยืนยันการเข้า</button>
+            </div>
+        </div>
+      </div>
+
+
+      <div id="appSection" class="hidden view-section animate-fade-in h-full flex flex-col">
+          <div id="appMenuPage" class="flex-1 flex flex-col p-2">
+              
+              <div class="mb-2 mt-2">
+                 <div class="bg-white p-1 rounded-xl border border-gray-200 flex shadow-sm">
+                     <input type="text" id="quickSearchInput" onkeydown="if(event.key === 'Enter') { this.blur(); handleQuickSearch(); }" class="flex-1 bg-transparent h-10 pl-3 text-sm text-gray-700 placeholder-gray-400 outline-none" placeholder="ค้นหาทะเบียน หรือ ห้อง (ด่วน)...">
+                     <button onclick="handleQuickSearch()" class="bg-blue-500 text-white w-10 h-10 rounded-lg flex items-center justify-center shadow-md hover:bg-blue-600 transition"><i class="fas fa-search"></i></button>
+                 </div>
+              </div>
+
+
+              <div class="grid grid-cols-2 gap-4 mt-2">
+                  <div onclick="openAppSubPage('history')" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40"><div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-ios-red"><i class="fas fa-history text-2xl"></i></div><span class="font-bold text-gray-700 text-sm">ประวัติ Visitor</span></div>
+                  <div onclick="openAppSubPage('temp')" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40"><div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-ios-red"><i class="fas fa-clock text-2xl"></i></div><span class="font-bold text-gray-700 text-sm">จอดชั่วคราว</span></div>
+                  <div onclick="openAppSubPage('license')" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40"><div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-ios-red"><i class="fas fa-car-side text-2xl"></i></div><span class="font-bold text-gray-700 text-sm">ทะเบียนรถ</span></div>
+                  <div onclick="openAppSubPage('owner')" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40"><div class="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-ios-red"><i class="fas fa-user-friends text-2xl"></i></div><span class="font-bold text-gray-700 text-sm">รายชื่อเจ้าของ</span></div>
+                  
+                  <div onclick="openAiMode()" class="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-3 active:scale-95 transition cursor-pointer h-40 col-span-2">
+                      <div class="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-500">
+                          <i class="fas fa-robot text-2xl"></i>
+                      </div>
+                      <span class="font-bold text-gray-700 text-sm">โหมด Ai</span>
+                  </div>
+
+              </div>
+          </div>
+
+
+          <div id="visitorHistoryPage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
+              <div class="flex items-center justify-between mb-4 mt-2 px-2">
+                  <div class="flex items-center gap-2"><button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition"><i class="fas fa-chevron-left"></i></button><h2 class="text-xl font-bold text-gray-900">ประวัติ <span class="text-ios-red">V</span>isitor</h2></div>
+              </div>
+              <div id="historyListContainer" class="flex-1 overflow-y-auto pb-20 px-2"></div>
+          </div>
+
+
+          <div id="tempParkingPage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
+              <div class="flex justify-between items-center mb-4 mt-2 px-2">
+                  <div class="flex items-center gap-3"><button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition"><i class="fas fa-chevron-left"></i></button><h2 class="text-xl font-bold text-gray-900">จอดชั่วคราว</h2></div>
+                  <button onclick="openAddTempModal()" class="w-10 h-10 rounded-full bg-ios-red text-white shadow hover:bg-red-600 active:scale-90 transition flex items-center justify-center"><i class="fas fa-plus"></i></button>
+              </div>
+              <div class="flex bg-white rounded-xl shadow-sm mb-4 mx-2 overflow-hidden">
+                 <div id="tabTempActive" onclick="switchTempTab('active')" class="flex-1 py-3 text-center text-sm font-bold text-ios-red border-b-4 border-ios-red bg-white transition cursor-pointer">กำลังดำเนินการ</div>
+                 <div id="tabTempHistory" onclick="switchTempTab('history')" class="flex-1 py-3 text-center text-sm font-medium text-gray-400 border-b border-gray-100 hover:text-gray-600 bg-white transition cursor-pointer">ประวัติ</div>
+              </div>
+              <div class="relative mb-4 mx-2">
+                 <input type="text" id="tempSearchInput" onkeyup="renderTempList()" class="w-full bg-white h-12 pl-10 pr-4 rounded-xl border-none shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-gray-100 text-gray-600 placeholder-gray-400" placeholder="ค้นหาห้องหรือทะเบียน...">
+                 <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              </div>
+              <div id="tempListContainer" class="flex-1 overflow-y-auto pb-20 px-2"></div>
+          </div>
+          
+          <div id="licensePlatePage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
+              <div class="flex justify-between items-center mb-4 mt-2 px-2">
+                  <div class="flex items-center gap-3"><button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition"><i class="fas fa-chevron-left"></i></button><h2 class="text-xl font-bold text-gray-900">ทะเบียนรถ</h2></div>
+                  <button onclick="openAddLicenseModal()" class="w-10 h-10 rounded-full bg-ios-red text-white shadow hover:bg-red-600 active:scale-90 transition flex items-center justify-center"><i class="fas fa-plus"></i></button>
+              </div>
+              
+              <div class="relative mb-4 mx-2">
+                 <input type="text" id="licenseSearchInput" onkeyup="renderLicenseList()" class="w-full bg-white h-12 pl-10 pr-4 rounded-xl border-none shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-gray-100 text-gray-600 placeholder-gray-400" placeholder="ค้นหาทะเบียน, ห้อง, ชื่อ...">
+                 <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              </div>
+
+
+              <div id="licenseListContainer" class="flex-1 overflow-y-auto pb-20 px-2"></div>
+          </div>
+
+
+          <div id="ownerListPage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
+              <div class="flex justify-between items-center mb-4 mt-2 px-2">
+                  <div class="flex items-center gap-3"><button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition"><i class="fas fa-chevron-left"></i></button><h2 class="text-xl font-bold text-gray-900">รายชื่อเจ้าของ</h2></div>
+                  <button onclick="openAddOwnerModal()" class="w-10 h-10 rounded-full bg-ios-red text-white shadow hover:bg-red-600 active:scale-90 transition flex items-center justify-center"><i class="fas fa-plus"></i></button>
+              </div>
+              
+              <div class="relative mb-4 mx-2">
+                 <input type="text" id="ownerSearchInput" onkeyup="renderOwnerList()" class="w-full bg-white h-12 pl-10 pr-4 rounded-xl border-none shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-gray-100 text-gray-600 placeholder-gray-400" placeholder="ค้นหาห้อง, ชื่อ...">
+                 <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              </div>
+
+
+              <div id="ownerListContainer" class="flex-1 overflow-y-auto pb-20 px-2"></div>
+          </div>
+
+          <div id="aiModePage" class="hidden flex-1 flex flex-col h-full bg-ios-bg">
+              <div class="flex items-center gap-3 mb-4 mt-2 px-2">
+                  <button onclick="openAppSubPage('menu')" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 transition">
+                      <i class="fas fa-chevron-left"></i>
+                  </button>
+                  <h2 class="text-xl font-bold text-gray-900">AI Mode</h2>
+              </div>
+              
+              <div class="flex-1 flex flex-col items-center justify-center pb-20 opacity-50">
+                  <i class="fas fa-code text-6xl text-gray-300 mb-4"></i>
+                  <h1 class="text-2xl font-bold text-gray-400">กำลังพัฒนา</h1>
+                  <p class="text-sm text-gray-400 mt-2">ฟีเจอร์นี้ยังไม่เปิดใช้งาน</p>
+              </div>
+          </div>
+
+      </div>
+
+
+    </main>
+
+
+    <nav class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 h-[80px] pb-safe-bottom z-40 flex justify-around items-start pt-2">
+        <button id="btnTabHome" onclick="switchTab('home')" class="flex-1 flex flex-col items-center justify-center h-14 space-y-1 active:opacity-50 transition"><i class="fas fa-qrcode text-xl text-ios-red mb-0.5"></i><span class="text-[10px] font-semibold text-ios-red">Visitor</span></button>
+        <button id="btnTabApp" onclick="switchTab('app')" class="flex-1 flex flex-col items-center justify-center h-14 space-y-1 active:opacity-50 transition"><i class="fas fa-th-large text-xl text-gray-400 mb-0.5"></i><span class="text-[10px] font-medium text-gray-500">App</span></button>
+    </nav>
+
+
+    <div id="quickSearchModal" class="hidden fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2"><i class="fas fa-search text-blue-500"></i> ผลการค้นหา</h3>
+                <button onclick="closeQuickSearchModal()" class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="quickSearchResultContent" class="overflow-y-auto flex-1">
+                </div>
+        </div>
+    </div>
+
+
+    <div id="historyDetailModal" class="hidden fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative max-h-[90vh] flex flex-col">
+            
+            <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center flex-none">
+                <h3 class="font-bold text-gray-800">รายละเอียด</h3>
+                <div class="flex items-center gap-4">
+                    <div id="histDetailViewControls" class="flex gap-4">
+                         <button onclick="enableHistoryEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
+                         <button onclick="printHistoryDetail()" class="text-gray-500 hover:text-gray-800 transition" title="พิมพ์"><i class="fas fa-print text-xl"></i></button>
+                    </div>
+                    <div id="histDetailEditControls" class="hidden flex gap-3">
+                         <button onclick="cancelHistoryEdit()" class="text-gray-500 font-bold text-sm">ยกเลิก</button>
+                         <button onclick="saveHistoryEdit()" class="text-ios-red font-bold text-sm">บันทึก</button>
+                    </div>
+                    <button onclick="closeHistoryDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                </div>
+            </div>
+
+
+            <div class="p-5 overflow-y-auto">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div><span class="text-xs text-gray-400 block">เลขบัตร</span><span id="histDetailCardId" class="font-bold text-gray-800 text-lg"></span></div>
+                    <div><span class="text-xs text-gray-400 block">เลขห้อง</span><span id="histDetailRoom" class="font-bold text-gray-800 text-lg"></span></div>
+                </div>
+                <div class="bg-gray-50 rounded-xl p-3 mb-4 space-y-2 border border-gray-100">
+                    <div class="flex justify-between items-center border-b border-dashed border-gray-200 pb-2"><span class="text-xs text-gray-400 font-bold w-10">เข้า</span><div class="text-right"><span id="histDetailEntryDate" class="text-xs text-gray-500 mr-2"></span><span id="histDetailEntryTime" class="font-bold text-gray-800 text-lg"></span></div></div>
+                    <div class="flex justify-between items-center"><span class="text-xs text-gray-400 font-bold w-10">ออก</span><div class="text-right"><span id="histDetailExitDate" class="text-xs text-gray-500 mr-2"></span><span id="histDetailExitTime" class="font-bold text-gray-800 text-lg"></span></div></div>
+                </div>
+                <div class="bg-red-50 p-3 rounded-xl flex justify-between items-center mb-4"><span class="text-red-500 font-bold text-sm">ยอดชำระ</span><span id="histDetailPrice" class="text-red-600 font-extrabold text-xl"></span></div>
+
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-xs text-gray-400 block mb-1">รูปรถ</label>
+                        <div id="histDetailPlateContainer" onclick="handleHistoryImgClick('plate')" class="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative">
+                            <div id="histDetailPlatePlaceholder" class="flex flex-col items-center text-center p-4 absolute inset-0 justify-center">
+                                <i class="fas fa-car-side text-2xl text-gray-300"></i><span class="text-xs text-gray-400 mt-1">ไม่มีรูป</span>
+                            </div>
+                            <img id="histDetailPlateImg" class="hidden absolute inset-0 w-full h-full object-cover">
+                            <div id="histDetailPlateOverlay" class="absolute inset-0 bg-black/40 hidden flex items-center justify-center text-white text-sm font-bold backdrop-blur-[1px]"><i class="fas fa-camera mr-2"></i> เปลี่ยนรูป</div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="text-xs text-gray-400 block mb-1">รูปบัตรประชาชน</label>
+                        <div id="histDetailIdContainer" onclick="handleHistoryImgClick('idcard')" class="w-full bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative" style="aspect-ratio: 1.59;">
+                            <img id="histDetailIdImg" class="hidden absolute inset-0 w-full h-full object-cover">
+                            <div id="histDetailIdPlaceholder" class="flex flex-col items-center text-center p-4 absolute inset-0 justify-center">
+                                <i class="fas fa-id-card text-2xl text-gray-300"></i><span class="text-xs text-gray-400 mt-1">เพิ่มรูปบัตร</span>
+                            </div>
+                            <div id="histDetailIdOverlay" class="absolute inset-0 bg-black/40 hidden flex items-center justify-center text-white text-sm font-bold backdrop-blur-[1px]"><i class="fas fa-camera mr-2"></i> เปลี่ยนรูป</div>
+                        </div>
+                    </div>
+
+
+                    <div id="histDetailSlipSection">
+                        <label class="text-xs text-gray-400 block mb-1">รูปสลิป</label>
+                        <div id="histDetailSlipContainer" onclick="handleHistoryImgClick('slip')" class="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative">
+                            <img id="histDetailSlipImg" class="hidden absolute inset-0 w-full h-full object-cover">
+                            <div id="histDetailSlipPlaceholder" class="flex flex-col items-center text-center p-4 absolute inset-0 justify-center">
+                                <i class="fas fa-file-invoice-dollar text-2xl text-gray-300"></i><span class="text-xs text-gray-400 mt-1">ไม่มีรูป</span>
+                            </div>
+                            <div id="histDetailSlipOverlay" class="absolute inset-0 bg-black/40 hidden flex items-center justify-center text-white text-sm font-bold backdrop-blur-[1px]"><i class="fas fa-camera mr-2"></i> เปลี่ยนรูป</div>
+                        </div>
+                    </div>
+                </div>
+
+
+            </div>
+        </div>
+    </div>
+
+
+    <div id="exitPopupModal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 animate-slide-up shadow-2xl">
+            <div class="text-center mb-6 pt-2">
+                 <span class="text-gray-400 text-sm font-medium">ยอดชำระสุทธิ</span>
+                 <div class="text-6xl font-extrabold text-gray-900 mt-1 tracking-tight flex justify-center items-end gap-2" style="line-height: 1;">
+                    <span id="exitPriceDisplay">0</span> <span class="text-2xl text-gray-400 font-bold mb-1">฿</span>
+                 </div>
+            </div>
+            <div id="exitInfo" class="bg-gray-50 rounded-xl p-4 mb-4"></div>
+            <div id="slipImageContainer" onclick="openCamera('slip')" class="w-full aspect-square bg-white border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center gap-3 mb-6 cursor-pointer hover:bg-gray-50 relative overflow-hidden transition group">
+                <div id="slipPlaceholder" class="flex flex-col items-center gap-2"><div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center group-hover:bg-gray-200 transition"><i class="fas fa-file-invoice-dollar text-2xl text-gray-400"></i></div><span class="text-sm text-gray-600 font-medium">กดเพื่อถ่ายสลิป</span></div>
+                <img id="slipPreview" class="hidden absolute inset-0 w-full h-full object-contain bg-black">
+            </div>
+            <div class="flex gap-3">
+                <button onclick="resetHome()" class="flex-1 h-12 rounded-xl border border-gray-200 text-gray-500 font-bold hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onclick="submitExit()" class="flex-1 h-12 rounded-xl bg-ios-red text-white font-bold shadow-lg shadow-red-200 hover:bg-red-600 transition">ยืนยันออก</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="addTempModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">เพิ่มรายการจอดชั่วคราว</h3>
+            <div class="space-y-3">
+                <input type="text" id="tempRoom" placeholder="เลขห้อง" class="w-full h-10 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                <input type="text" id="tempPlate" placeholder="ทะเบียนรถ" class="w-full h-10 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                <div class="grid grid-cols-2 gap-2"><div><label class="text-xs text-gray-400 block mb-1">วันที่เริ่ม</label><input type="date" id="tempStartDate" class="w-full h-10 border border-gray-200 rounded-lg px-2 text-sm bg-white"></div><div><label class="text-xs text-gray-400 block mb-1">เวลาเริ่ม</label><select id="tempStartHour" class="w-full h-10 border border-gray-200 rounded-lg px-2 bg-white text-gray-800"></select></div></div>
+                <div class="grid grid-cols-2 gap-2"><div><label class="text-xs text-gray-400 block mb-1">วันที่สิ้นสุด</label><input type="date" id="tempEndDate" class="w-full h-10 border border-gray-200 rounded-lg px-2 text-sm bg-white"></div><div><label class="text-xs text-gray-400 block mb-1">เวลาสิ้นสุด</label><select id="tempEndHour" class="w-full h-10 border border-gray-200 rounded-lg px-2 bg-white text-gray-800"></select></div></div>
+                <div><label class="text-xs text-gray-400 block mb-1">รูปรถ (ไม่บังคับ)</label><div onclick="captureTempAddImage()" class="w-full h-24 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-100 overflow-hidden relative"><div id="addTempImgPlaceholder" class="flex flex-col items-center"><i class="fas fa-image text-gray-400 text-xl mb-1"></i><span class="text-[10px] text-gray-400">กดเลือกรูปภาพ</span></div><img id="addTempImgPreview" class="hidden absolute inset-0 w-full h-full object-cover"></div></div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeAddTempModal()" class="flex-1 py-2.5 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
+                <button onclick="submitTempAdd()" class="flex-1 py-2.5 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="addLicenseModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl max-h-[90vh] overflow-y-auto pb-10">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">ลงทะเบียนรถใหม่</h3>
+            <div class="space-y-3">
+                <input type="text" id="licPlate" placeholder="ทะเบียนรถ" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                <input type="text" id="licRoom" placeholder="เลขห้อง" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                
+                <div class="relative">
+                    <input type="number" id="licParkingRights" placeholder="สิทธิ์การจอด (จำนวนคัน)" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">คัน</span>
+                </div>
+
+
+                <input type="text" id="licName" placeholder="ชื่อเจ้าผู้ใช้รถ" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                <input type="tel" id="licPhone" placeholder="เบอร์โทรผู้ใช้รถ" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                
+                <textarea id="licNote" placeholder="หมายเหตุ (Admin)" class="w-full h-20 border border-gray-200 rounded-lg px-3 py-2 focus:border-yellow-400 outline-none resize-none text-sm"></textarea>
+                
+                <div>
+                    <label class="text-xs text-gray-400 block mb-1">รูปรถ (ไม่บังคับ)</label>
+                    <div onclick="addLicenseImage()" class="w-full aspect-square bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-100 overflow-hidden relative">
+                        <div id="licImgPlaceholder" class="flex flex-col items-center">
+                            <i class="fas fa-image text-gray-400 text-xl mb-1"></i>
+                            <span class="text-[10px] text-gray-400">เพิ่มรูป</span>
+                        </div>
+                        <img id="licImgPreview" class="hidden absolute inset-0 w-full h-full object-cover">
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeAddLicenseModal()" class="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
+                <button onclick="submitLicenseAdd()" class="flex-1 py-3 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="addOwnerModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl max-h-[90vh] overflow-y-auto pb-10">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">เพิ่มรายชื่อเจ้าของ</h3>
+            <div class="space-y-3">
+                <input type="text" id="addOwnerRoom" placeholder="เลขห้อง *" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                <input type="text" id="addOwnerName" placeholder="ชื่อ-นามสกุล *" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="addOwnerFloor" placeholder="ชั้น" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                    <input type="text" id="addOwnerSize" placeholder="ขนาดห้อง" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                </div>
+
+
+                <input type="tel" id="addOwnerPhone1" placeholder="เบอร์โทรศัพท์ 1" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                <input type="tel" id="addOwnerPhone2" placeholder="เบอร์โทรศัพท์ 2" class="w-full h-12 border border-gray-200 rounded-lg px-3 focus:border-yellow-400 outline-none">
+                
+                <textarea id="addOwnerNote" placeholder="หมายเหตุ" class="w-full h-24 border border-gray-200 rounded-lg px-3 py-2 focus:border-yellow-400 outline-none resize-none text-sm"></textarea>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeAddOwnerModal()" class="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
+                <button onclick="submitOwnerAdd()" class="flex-1 py-3 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="licenseDetailModal" class="hidden fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative max-h-[90vh] flex flex-col">
+            <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center flex-none">
+                <h3 class="font-bold text-gray-800">รายละเอียดรถยนต์</h3>
+                
+                <div id="licDetailViewControls" class="flex items-center gap-4">
+                    <button onclick="enableLicenseEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
+                    <button onclick="closeLicenseDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                </div>
+                
+                <div id="licDetailEditControls" class="hidden flex items-center gap-3">
+                    <button onclick="cancelLicenseEdit()" class="text-gray-500 font-bold text-sm">ยกเลิก</button>
+                    <button onclick="saveLicenseEdit()" class="text-ios-red font-bold text-sm">บันทึก</button>
+                </div>
+            </div>
+            
+            <div class="p-5 overflow-y-auto">
+                <div class="mb-5">
+                    <div id="detailLicImgContainer" class="w-full aspect-square bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 relative group cursor-pointer">
+                        <img id="detailLicImg" class="hidden w-full h-full object-cover">
+                        <div id="detailLicImgPlaceholder" class="flex flex-col items-center text-gray-300">
+                            <i class="fas fa-car text-4xl mb-2"></i>
+                            <span class="text-xs">ไม่มีรูปรถ</span>
+                        </div>
+                        <div id="detailLicImgOverlay" class="absolute inset-0 bg-black/20 hidden flex items-center justify-center text-white text-xs font-bold backdrop-blur-[1px]">
+                            <i class="fas fa-camera mr-2"></i> เปลี่ยนรูป
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-xs text-gray-400 block">เลขห้อง</span>
+                            <span id="detailLicRoom" class="font-bold text-gray-800 text-lg"></span>
+                            <input id="editLicRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-400 block">ทะเบียน</span>
+                            <span id="detailLicPlate" class="font-bold text-gray-800 text-lg"></span>
+                            <input id="editLicPlate" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
+                        </div>
+                    </div>
+                    
+                    <div class="bg-blue-50 p-2 rounded-lg flex items-center justify-between">
+                        <span class="text-xs text-blue-500 font-bold">สิทธิ์การจอด</span>
+                        <span id="detailLicRights" class="text-blue-700 font-extrabold text-lg"></span>
+                        <input id="editLicRights" type="number" class="hidden w-20 border border-blue-200 rounded px-2 py-1 text-sm font-bold text-blue-700 text-right focus:border-blue-500 outline-none">
+                    </div>
+
+
+                    <div class="border-t border-dashed border-gray-200 pt-3">
+                         <div class="mb-2">
+                             <span class="text-xs text-gray-400 block">ชื่อเจ้าของ</span>
+                             <span id="detailLicName" class="font-medium text-gray-800"></span>
+                             <input id="editLicName" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
+                         </div>
+                         <div class="mb-2">
+                             <span class="text-xs text-gray-400 block">เบอร์โทรศัพท์</span>
+                             <div><span id="detailLicPhone" class="font-medium text-gray-800"></span></div>
+                             <input id="editLicPhone" type="tel" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
+                         </div>
+                         <div>
+                             <span class="text-xs text-gray-400 block">หมายเหตุ</span>
+                             <span id="detailLicNote" class="text-sm text-gray-600 bg-gray-50 p-2 rounded block mt-1"></span>
+                             <textarea id="editLicNote" rows="2" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-600 focus:border-blue-500 outline-none resize-none bg-white"></textarea>
+                         </div>
+                    </div>
+                    
+                    <button id="licDeleteBtn" onclick="deleteCurrentLicense()" class="hidden w-full py-2.5 text-red-500 font-bold border border-red-100 bg-red-50 rounded-xl hover:bg-red-100 mt-4">ลบรายการ</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="ownerDetailModal" class="hidden fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative max-h-[90vh] flex flex-col">
+            <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center flex-none">
+                <h3 class="font-bold text-gray-800">รายละเอียดเจ้าของ</h3>
+                <div id="ownerDetailViewControls" class="flex items-center gap-4">
+                    <button onclick="enableOwnerEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
+                    <button onclick="closeOwnerDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                </div>
+                <div id="ownerDetailEditControls" class="hidden flex items-center gap-3">
+                    <button onclick="cancelOwnerEdit()" class="text-gray-500 font-bold text-sm">ยกเลิก</button>
+                    <button onclick="saveOwnerEdit()" class="text-ios-red font-bold text-sm">บันทึก</button>
+                </div>
+            </div>
+            
+            <div class="p-5 overflow-y-auto">
+                <div class="space-y-4">
+                    <div>
+                        <span class="text-xs text-gray-400 block">เลขห้อง</span>
+                        <span id="detailOwnerRoom" class="font-bold text-gray-800 text-lg"></span>
+                        <input id="editOwnerRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-400 block">ชื่อ-นามสกุล</span>
+                        <span id="detailOwnerName" class="font-bold text-gray-800 text-lg"></span>
+                        <input id="editOwnerName" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800 focus:border-blue-500 outline-none">
+                    </div>
+                    
+                    <div class="border-t border-dashed border-gray-200 pt-3"></div>
+
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-xs text-gray-400 block">ชั้น</span>
+                            <span id="detailOwnerFloor" class="font-medium text-gray-800"></span>
+                            <input id="editOwnerFloor" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-400 block">ขนาดห้อง</span>
+                            <span id="detailOwnerSize" class="font-medium text-gray-800"></span>
+                            <input id="editOwnerSize" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
+                        </div>
+                    </div>
+
+
+                    <div>
+                         <span class="text-xs text-gray-400 block">เบอร์โทรศัพท์ 1</span>
+                         <div><span id="detailOwnerPhone1" class="font-medium text-gray-800"></span></div>
+                         <input id="editOwnerPhone1" type="tel" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
+                    </div>
+                    <div>
+                         <span class="text-xs text-gray-400 block">เบอร์โทรศัพท์ 2</span>
+                         <div><span id="detailOwnerPhone2" class="font-medium text-gray-800"></span></div>
+                         <input id="editOwnerPhone2" type="tel" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 outline-none">
+                    </div>
+
+
+                    <div>
+                         <span class="text-xs text-gray-400 block">หมายเหตุ</span>
+                         <span id="detailOwnerNote" class="text-sm text-gray-600 bg-gray-50 p-2 rounded block mt-1"></span>
+                         <textarea id="editOwnerNote" rows="2" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm text-gray-600 focus:border-blue-500 outline-none resize-none bg-white"></textarea>
+                    </div>
+                    
+                    <button id="ownerDeleteBtn" onclick="deleteCurrentOwner()" class="hidden w-full py-2.5 text-red-500 font-bold border border-red-100 bg-red-50 rounded-xl hover:bg-red-100 mt-4">ลบรายการ</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="tempDetailModal" class="hidden fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative">
+            <div class="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center">
+                <h3 class="font-bold text-gray-800">รายละเอียด</h3>
+                <div class="flex items-center gap-4">
+                    <button id="tempDetailEditBtn" onclick="enableTempEdit()" class="text-blue-500 hover:text-blue-700 font-bold text-sm">แก้ไข</button>
+                    <button onclick="closeTempDetail()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+                </div>
+            </div>
+            <div class="p-5">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <span class="text-xs text-gray-400 block">เลขห้อง</span>
+                        <span id="viewTempRoom" class="font-bold text-gray-800 text-lg block"></span>
+                        <input id="editTempRoom" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800">
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-400 block">ทะเบียน</span>
+                        <span id="viewTempPlate" class="font-bold text-gray-800 text-lg block"></span>
+                        <input id="editTempPlate" type="text" class="hidden w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold text-gray-800">
+                    </div>
+                </div>
+                <div class="space-y-2 text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl">
+                    <div class="flex justify-between"><span>เริ่ม:</span> <span id="detailTempStart" class="font-medium"></span></div>
+                    <div class="flex justify-between"><span>สิ้นสุด:</span> <span id="detailTempEnd" class="font-medium"></span></div>
+                    <div class="flex justify-between"><span>สถานะ:</span> <span id="detailTempStatus" class="font-bold text-blue-600"></span></div>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="text-xs text-gray-400 block mb-1">รูปรถ</label>
+                    <div id="detailTempImgContainer" onclick="handleTempImgClick()" class="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden relative group">
+                        <img id="detailTempImg" class="hidden w-full h-full object-cover">
+                        <div id="detailTempImgPlaceholder" class="flex flex-col items-center">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-300"></i>
+                            <span class="text-xs text-gray-400 mt-1">อัปโหลดรูปภาพ</span>
+                        </div>
+                        <div id="detailTempImgOverlay" class="absolute inset-0 bg-black/20 hidden flex items-center justify-center text-white text-xs font-bold">แตะเพื่อเปลี่ยนรูป</div>
+                    </div>
+                </div>
+
+
+                <div id="tempDetailViewControls">
+                    <button id="tempDetailDeleteBtn" onclick="deleteCurrentTemp()" class="w-full py-2.5 text-red-500 font-bold border border-red-100 bg-red-50 rounded-xl hover:bg-red-100">ยกเลิกรายการ</button>
+                </div>
+
+
+                <div id="tempDetailEditControls" class="hidden flex gap-3">
+                      <button onclick="cancelTempEdit()" class="flex-1 py-2.5 text-gray-600 font-bold bg-gray-100 rounded-xl">ยกเลิก</button>
+                      <button onclick="saveTempEdit()" class="flex-1 py-2.5 text-white font-bold bg-ios-red rounded-xl shadow-lg shadow-red-200">บันทึก</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="fullImageModal" class="hidden fixed inset-0 z-[70] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm cursor-zoom-out" onclick="closeFullImage()">
+        <img id="fullImagePreview" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-300 scale-100">
+        <button class="absolute top-4 right-4 text-white/80 hover:text-white p-2">
+            <i class="fas fa-times text-2xl"></i>
+        </button>
+    </div>
+
+
+    <div id="alertModal" class="hidden fixed inset-0 z-[60] bg-black/20 flex items-center justify-center p-8">
+        <div class="bg-white rounded-2xl p-6 shadow-xl w-64 text-center animate-scale-in">
+            <i id="alertIcon" class="fas fa-check-circle text-4xl text-green-500 mb-2"></i>
+            <h4 id="alertTitle" class="font-bold text-gray-800 text-lg mb-1">Title</h4>
+            <p id="alertMessage" class="text-gray-500 text-sm mb-4">Message</p>
+            <button onclick="closeAlert()" class="w-full py-2 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200">ตกลง</button>
+        </div>
+    </div>
+
+
+    <div id="confirmModal" class="hidden fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-6">
+        <div class="bg-white rounded-2xl p-6 shadow-xl w-full max-w-xs text-center">
+            <h4 id="confirmTitle" class="font-bold text-gray-800 text-lg mb-2">ยืนยัน</h4>
+            <p id="confirmMessage" class="text-gray-500 text-sm mb-5">ยืนยันการทำรายการ?</p>
+            <div class="flex gap-3">
+                 <button onclick="closeConfirm()" class="flex-1 py-2 border border-gray-200 text-gray-600 font-bold rounded-lg">ยกเลิก</button>
+                 <button onclick="onConfirmYes()" class="flex-1 py-2 bg-ios-red text-white font-bold rounded-lg">ยืนยัน</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="pinModal" class="hidden fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-center justify-center p-6">
+        <div class="bg-white rounded-2xl p-6 shadow-xl w-full max-w-xs text-center animate-scale-in">
+            <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
+                <i class="fas fa-lock text-xl"></i>
+            </div>
+            <h4 class="font-bold text-gray-800 text-lg mb-2">ยืนยันสิทธิ์</h4>
+            <p class="text-gray-500 text-sm mb-4">กรุณากรอกรหัสผ่านเพื่อดำเนินการ</p>
+            
+            <input type="password" id="pinInput" class="w-full h-12 border border-gray-200 rounded-xl text-center text-2xl font-bold tracking-widest mb-4 focus:border-ios-red focus:ring-2 focus:ring-ios-red/20 outline-none transition" placeholder="PIN" maxlength="4" inputmode="numeric" onkeydown="if(event.key === 'Enter') submitAdminPin()">
+            
+            <div class="flex gap-3">
+                 <button onclick="closePinModal()" class="flex-1 py-2 border border-gray-200 text-gray-600 font-bold rounded-lg hover:bg-gray-50">ยกเลิก</button>
+                 <button onclick="submitAdminPin()" class="flex-1 py-2 bg-ios-red text-white font-bold rounded-lg shadow-lg shadow-red-200 hover:bg-red-600">ยืนยัน</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="qrModal" class="hidden fixed inset-0 z-[80] bg-black/80 flex flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-2xl p-4 w-full max-w-sm relative">
+            <button onclick="stopQrScanner()" class="absolute top-2 right-2 text-gray-400 hover:text-gray-600 z-10 w-8 h-8 flex items-center justify-center">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+            <h3 class="text-center font-bold text-gray-800 mb-4">สแกน QR Code</h3>
+            <div id="reader" class="w-full rounded-lg overflow-hidden bg-black h-96"></div>
+            <p class="text-center text-xs text-gray-400 mt-4">วาง QR Code ให้อยู่ในกรอบ</p>
+        </div>
+    </div>
+
+
+    <div id="cameraModal" class="hidden fixed inset-0 z-[70] bg-black flex flex-col">
+        <div class="relative flex-1 bg-black flex items-center justify-center">
+            <video id="cameraVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+            <button onclick="closeCamera()" class="absolute top-4 right-4 text-white text-2xl z-10"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="h-24 bg-black flex items-center justify-center pb-4">
+             <button onclick="takePhoto()" class="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center">
+                 <div class="w-12 h-12 bg-white rounded-full"></div>
+             </button>
+        </div>
+    </div>
+
+
+  </body>
+</html>
